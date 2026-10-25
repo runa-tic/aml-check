@@ -1,0 +1,14 @@
+{
+  "name": "aml-check",
+  "owner": {
+    "name": "runa-tic"
+  },
+  "description": "Personal marketplace for the aml-check plugin",
+  "plugins": [
+    {
+      "name": "aml-check",
+      "source": "./",
+      "description": "Free AML screen for EVM wallet addresses"
+    }
+  ]
+}

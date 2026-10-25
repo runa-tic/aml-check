@@ -12,10 +12,12 @@ Check 3 needs transaction history:
         ~hour per IP, i.e. about three scans an hour)
   arb - Etherscan V2 with a free key (ETHERSCAN_API_KEY)
   bsc - Etherscan V2 with a PAID key (Etherscan dropped BNB from the free tier in 2025)
-A free key (etherscan.io/myapikey) covers eth + arb at 5 req/s.
+A free key (etherscan.io/myapikey) covers eth + arb at 5 req/s. It is read from
+ETHERSCAN_API_KEY, else from ~/.config/aml-check/etherscan_key.
 
 Usage:
-  ETHERSCAN_API_KEY=... python aml_check.py 0xYourAddress
+  python aml_check.py 0xYourAddress
+  python aml_check.py 0xYourAddress --details          # + gas balance and latest transfers
   python aml_check.py 0xYourAddress --chains eth,arb --max-tx 1000
 
 Exit code: 0 = nothing found, 1 = red flag found, 2 = error.
@@ -217,19 +219,38 @@ def fmt_time(ts):
     return time.strftime("%Y-%m-%d", time.gmtime(ts)) if ts else "?"
 
 
+KEY_FILE = os.path.join(os.path.expanduser("~"), ".config", "aml-check", "etherscan_key")
+
+
+def load_key():
+    """ETHERSCAN_API_KEY, else the key file, so a caller never has to put the key on a command line."""
+    key = os.environ.get("ETHERSCAN_API_KEY", "").strip()
+    if not key and os.path.isfile(KEY_FILE):
+        with open(KEY_FILE, encoding="utf-8") as f:
+            key = f.read().strip()
+    return key or None
+
+
+def native_balance(chain, addr):
+    r = http_json(CHAINS[chain]["rpc"], {"jsonrpc": "2.0", "id": 1, "method": "eth_getBalance",
+                                         "params": [addr, "latest"]})
+    return int(r["result"], 16) / 1e18
+
+
 def main():
     p = argparse.ArgumentParser(description="Free AML screen for an EVM address.")
     p.add_argument("address")
     p.add_argument("--chains", default="eth,bsc,arb", help="comma list from: eth,bsc,arb")
     p.add_argument("--max-tx", type=int, default=1000, help="max records per history type (free Etherscan caps at 1000)")
     p.add_argument("--json", action="store_true", help="print machine-readable result")
+    p.add_argument("--details", action="store_true", help="also show gas balance and the latest transfers")
     a = p.parse_args()
 
     addr = a.address.strip().lower()
     if not (addr.startswith("0x") and len(addr) == 42 and all(c in "0123456789abcdef" for c in addr[2:])):
         print("not an EVM address (expected 0x + 40 hex chars)", file=sys.stderr)
         return 2
-    key = os.environ.get("ETHERSCAN_API_KEY", "").strip() or None
+    key = load_key()
     chains = [c.strip() for c in a.chains.split(",") if c.strip()]
     bad = [c for c in chains if c not in CHAINS]
     if bad:
@@ -248,6 +269,11 @@ def main():
             continue
         out["self"] = own
         red |= bool(own["sanctioned"]) or bool(own["frozen_by"])
+        if a.details:
+            try:
+                out["native_balance"] = native_balance(chain, addr)
+            except Exception:
+                out["native_balance"] = None
 
         try:
             rows, src, note = history(chain, addr, key, a.max_tx)
@@ -286,6 +312,11 @@ def main():
             out["first_seen"] = fmt_time(min((t["time"] for t in rows), default=0))
             out["flagged_counterparties"] = sorted(flags, key=lambda f: -f["n"])
             red |= bool(flags)
+            if a.details:
+                out["recent"] = [{"time": t["time"], "dir": "in" if t["to"] == addr else "out",
+                                  "counterparty": t["from"] if t["to"] == addr else t["to"],
+                                  "value": t["value"], "symbol": t["symbol"], "hash": t["hash"]}
+                                 for t in sorted(rows, key=lambda t: -t["time"])[:10] if t["value"]]
         result["chains"][chain] = out
 
     result["verdict"] = "RED FLAG" if red else "no red flags in public data"
@@ -311,6 +342,8 @@ def main():
             print("   frozen by    n/a  (stablecoins here have no on-chain freeze list)")
         if out.get("history_source") is None and out.get("history_note") and "transfers" not in out:
             print(f"   contacts     skipped: {out['history_note']}")
+        elif out.get("transfers") == 0:
+            print(f"   contacts     no transfers yet  ({out['history_source']})")
         elif "transfers" in out:
             since = "oldest read" if out["truncated"] else "since"
             print(f"   contacts     {out['counterparties']} addresses over {out['transfers']} transfers"
@@ -324,6 +357,14 @@ def main():
                       f"({f['in']} in / {f['out']} out, last {fmt_time(f['last'])})")
         else:
             print(f"   contacts     failed: {out.get('history_note')}")
+        if "native_balance" in out:
+            bal = out["native_balance"]
+            gas = {"eth": "ETH", "bsc": "BNB", "arb": "ETH"}[chain]
+            print(f"   gas balance  {'?' if bal is None else f'{bal:.6g}'} {gas}")
+        for t in out.get("recent", []):
+            arrow = "<-" if t["dir"] == "in" else "->"
+            print(f"   {time.strftime('%Y-%m-%d %H:%M', time.gmtime(t['time']))}Z  {t['dir']:3} "
+                  f"{t['value']:.6g} {t['symbol']}  {arrow} {t['counterparty']}")
         print()
     print(f"VERDICT: {result['verdict']}")
     print("Public-data screen only: sanctions, stablecoin freezes and Tornado Cash, one hop deep.")
