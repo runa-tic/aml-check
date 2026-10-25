@@ -3,7 +3,7 @@
   "owner": {
     "name": "runa-tic"
   },
-  "description": "Personal marketplace for the aml-check plugin",
+  "description": "Marketplace for the aml-check plugin",
   "plugins": [
     {
       "name": "aml-check",

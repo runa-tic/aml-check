@@ -3,7 +3,16 @@
   "displayName": "AML Check",
   "version": "1.0.0",
   "description": "Free AML screen for EVM wallet addresses: sanctions, USDT/USDC freezes and Tornado Cash contacts on Ethereum, BNB Chain and Arbitrum",
-  "author": { "name": "runa-tic" },
+  "author": {
+    "name": "runa-tic"
+  },
   "repository": "https://github.com/runa-tic/aml-check",
-  "keywords": ["aml", "crypto", "evm", "sanctions", "wallet"]
+  "license": "MIT",
+  "keywords": [
+    "aml",
+    "crypto",
+    "evm",
+    "sanctions",
+    "wallet"
+  ]
 }
