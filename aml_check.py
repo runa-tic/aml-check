@@ -11,14 +11,21 @@ Check 3 needs transaction history:
   eth - Etherscan if ETHERSCAN_API_KEY is set, else keyless Blockscout (10 requests per
         ~hour per IP, i.e. about three scans an hour)
   arb - Etherscan V2 with a free key (ETHERSCAN_API_KEY)
-  bsc - Etherscan V2 with a PAID key (Etherscan dropped BNB from the free tier in 2025)
+  bsc - Etherscan V2 with a PAID key (Etherscan dropped BNB from the free tier in 2025); the
+        key is tried as is, and BNB Chain is skipped if Etherscan refuses it
 A free key (etherscan.io/myapikey) covers eth + arb at 5 req/s. It is read from
 ETHERSCAN_API_KEY, else from ~/.config/aml-check/etherscan_key.
+
+With history available, it also traces exposure (see exposure.py): the share of the address's
+incoming and outgoing USD value that comes from or goes to sanctioned, mixer, stolen-funds,
+exchange, bridge and other labelled sources, up to --hops wallets away.
 
 Usage:
   python aml_check.py 0xYourAddress
   python aml_check.py 0xYourAddress --details          # + gas balance and latest transfers
   python aml_check.py 0xYourAddress --chains eth,arb --max-tx 1000
+  python aml_check.py 0xYourAddress --hops 3 --budget 40   # deeper exposure trace
+  python aml_check.py 0xYourAddress --hops 0               # direct contacts only
 
 Exit code: 0 = nothing found, 1 = red flag found, 2 = error.
 This is public-data screening only; it is not what an exchange's own vendor will see.
@@ -32,6 +39,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+
+import exposure
 
 UA = {"User-Agent": "aml-check/1.0", "Content-Type": "application/json"}
 
@@ -180,10 +189,19 @@ def screen(chain, addrs):
     return report
 
 
+def etherscan_get(url, retries=4):
+    """GET an Etherscan-style API, waiting out its rate limit (reported as HTTP 200 + status 0)."""
+    for attempt in range(retries):
+        r = http_json(url)
+        if "rate limit" not in str(r.get("result", "")).lower() or attempt == retries - 1:
+            return r
+        time.sleep(1.0 * (attempt + 1))
+
+
 def history(chain, addr, key, max_tx):
     """Returns (transfers, source, note). transfers: list of dicts with from/to/value/symbol."""
     cfg = CHAINS[chain]
-    if key and (cfg["free_etherscan"] or os.environ.get("ETHERSCAN_PAID")):
+    if key:
         base, src = "https://api.etherscan.io/v2/api", "Etherscan"
         extra = {"chainid": cfg["id"], "apikey": key}
     elif cfg["blockscout"]:
@@ -197,18 +215,24 @@ def history(chain, addr, key, max_tx):
     for action in ("txlist", "tokentx", "txlistinternal"):
         q = {"module": "account", "action": action, "address": addr, "page": 1,
              "offset": max_tx, "sort": "desc", **extra}
-        r = http_json(base + "?" + urllib.parse.urlencode(q))
+        r = etherscan_get(base + "?" + urllib.parse.urlencode(q))
         res = r.get("result")
         if r.get("status") != "1" or not isinstance(res, list):
-            if isinstance(res, str) and "no transactions" not in (r.get("message", "") + res).lower():
+            msg = (r.get("message", "") + " " + str(res)).lower()
+            if not cfg["free_etherscan"] and ("not supported" in msg or "upgrade" in msg):
+                return None, None, "needs a paid Etherscan key"
+            if isinstance(res, str) and "no transactions" not in msg:
                 return None, src, f"{action}: {res[:120]}"
             continue
         truncated |= len(res) >= max_tx
         for t in res:
+            if t.get("isError") == "1":
+                continue  # reverted: the value never moved
             dec = int(t.get("tokenDecimal") or 18)
             rows.append({"from": (t.get("from") or "").lower(), "to": (t.get("to") or "").lower(),
                          "value": int(t.get("value") or 0) / 10 ** dec,
                          "symbol": t.get("tokenSymbol") or "native",
+                         "token": (t.get("contractAddress") or "").lower() if action == "tokentx" else "",
                          "time": int(t.get("timeStamp") or 0), "hash": t.get("hash")})
         time.sleep(0.25)  # stay under free-tier rate limits
     note = f"only the latest {max_tx} per type were read" if truncated else None
@@ -237,6 +261,52 @@ def native_balance(chain, addr):
     return int(r["result"], 16) / 1e18
 
 
+def print_exposure(chain, exp):
+    gas = {"eth": "ETH", "bsc": "BNB", "arb": "ETH"}[chain]
+    if "skipped" in exp:
+        print(f"   exposure     skipped: {exp['skipped']}")
+        return
+    inn, out = exp["in"], exp["out"]
+    if inn["usd"] <= 0 and out["usd"] <= 0:
+        print("   exposure     no priced transfers (native coin or major stablecoins) to trace")
+        return
+    read = inn["wallets_read"] + out["wallets_read"]
+    print(f"   exposure     in ${inn['usd']:,.0f} / out ${out['usd']:,.0f}, traced {inn['hops']} hops"
+          f", {read} wallets read, {exp['seconds']}s")
+    failed = inn.get("failed_reads", 0) + out.get("failed_reads", 0)
+    if failed:
+        print(f"                note: {failed} wallet histories could not be read; their share is untraced")
+    if not exp["priced_natives"]:
+        print(f"                note: no {gas} price, so only stablecoin transfers were counted")
+    order = ["severe", "high", "medium", "low", None]
+    usd = inn["usd"] + out["usd"]
+    rows = []
+    for cat in set(inn["categories"]) | set(out["categories"]):
+        ci, co = inn["categories"].get(cat, {}), out["categories"].get(cat, {})
+        total = (ci.get("share", 0) * inn["usd"] + co.get("share", 0) * out["usd"]) / usd
+        direct = ci.get("direct", 0) + co.get("direct", 0)
+        indirect = ci.get("indirect", 0) + co.get("indirect", 0)
+        how = "direct+indirect" if direct and indirect else "direct" if direct else "indirect"
+        weight = {}
+        for side, c in ((inn, ci), (out, co)):
+            for n, w in c.get("names", []):
+                weight[n] = weight.get(n, 0) + w * side["usd"]
+        names = ""
+        for n in sorted(weight, key=lambda n: -weight[n]):
+            if len(names) + len(n) > 70:
+                break
+            names += (", " if names else "") + n
+        rows.append((order.index(exposure.RISK.get(cat)), -total, cat, ci, co, total, how, names))
+    print("                  total     in    out  category          risk     how")
+    pct = lambda c: f"{c['share'] * 100:5.1f}%" if c else "     -"
+    for _, _, cat, ci, co, total, how, names in sorted(rows):
+        risk = exposure.RISK.get(cat) or "-"
+        mark = "!!" if risk in ("severe", "high") else "  "
+        print(f"              {mark} {total * 100:5.1f}% {pct(ci)} {pct(co)}  {cat:<17} {risk:<8} {how}")
+        if names:
+            print(f"                                         {names[:70]}")
+
+
 def main():
     p = argparse.ArgumentParser(description="Free AML screen for an EVM address.")
     p.add_argument("address")
@@ -244,6 +314,9 @@ def main():
     p.add_argument("--max-tx", type=int, default=1000, help="max records per history type (free Etherscan caps at 1000)")
     p.add_argument("--json", action="store_true", help="print machine-readable result")
     p.add_argument("--details", action="store_true", help="also show gas balance and the latest transfers")
+    p.add_argument("--hops", type=int, default=4, help="how many wallets away to trace exposure (0 = off)")
+    p.add_argument("--budget", type=int, default=25,
+                   help="max wallets whose history is read per chain and direction during the trace")
     a = p.parse_args()
 
     addr = a.address.strip().lower()
@@ -312,6 +385,12 @@ def main():
             out["first_seen"] = fmt_time(min((t["time"] for t in rows), default=0))
             out["flagged_counterparties"] = sorted(flags, key=lambda f: -f["n"])
             red |= bool(flags)
+            if a.hops > 0 and rows:
+                try:
+                    out["exposure"] = exposure.run(sys.modules[__name__], chain, addr, rows, key, a.hops, a.budget)
+                    red |= bool(exposure.red_flags(out["exposure"]))
+                except Exception as e:
+                    out["exposure_error"] = f"trace failed ({e})"
             if a.details:
                 out["recent"] = [{"time": t["time"], "dir": "in" if t["to"] == addr else "out",
                                   "counterparty": t["from"] if t["to"] == addr else t["to"],
@@ -357,6 +436,10 @@ def main():
                       f"({f['in']} in / {f['out']} out, last {fmt_time(f['last'])})")
         else:
             print(f"   contacts     failed: {out.get('history_note')}")
+        if "exposure" in out:
+            print_exposure(chain, out["exposure"])
+        elif "exposure_error" in out:
+            print(f"   exposure     {out['exposure_error']}")
         if "native_balance" in out:
             bal = out["native_balance"]
             gas = {"eth": "ETH", "bsc": "BNB", "arb": "ETH"}[chain]
@@ -367,8 +450,8 @@ def main():
                   f"{t['value']:.6g} {t['symbol']}  {arrow} {t['counterparty']}")
         print()
     print(f"VERDICT: {result['verdict']}")
-    print("Public-data screen only: sanctions, stablecoin freezes and Tornado Cash, one hop deep.")
-    print("It does not see the private labels (scams, darknet, risky exchanges) that paid tools use.\n")
+    print("Public-data screen only: sanctions, stablecoin freezes, Tornado Cash and public explorer")
+    print("labels. Paid tools cluster and label far more wallets, so they can still rate it higher.\n")
     return 1 if red else 0
 
 
