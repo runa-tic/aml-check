@@ -36,7 +36,12 @@ anything flagged. Keep it short when the address is fresh.
   share is a busy wallet no public label set knows: often an exchange, and the place a paid
   tool's sanctioned-exchange label usually lands, so give its address and say it is unnamed,
   not that it is clean. "untraced" is value the trace did not follow (hop limit, budget, failed
-  reads), not value known to be clean.
+  reads), not value known to be clean. A "via Aori" line means the money crossed chains in an
+  Aori swap and the trace followed the order to the wallet at the other end; name that wallet
+  and its chain. The order proves who sent to whom, not that both wallets have one owner.
+  Exposure runs one way: an inflow carries the sender's own sources, not the places the sender
+  paid later, so a wallet funded by a flagged wallet is not tainted by where that wallet's other
+  money went.
 - **Gas.** If the address holds stablecoins but 0 of the chain's gas token, say so: the funds are
   safe but can't move until some ETH or BNB arrives.
 - **Explain red flags plainly.** A sanctioned or frozen address is a hard stop. Contact with

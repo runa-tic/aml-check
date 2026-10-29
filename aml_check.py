@@ -54,6 +54,7 @@ SEL_CIRCLE = "fe575a87"          # isBlacklisted(address)  - Circle USDC
 CHAINS = {
     "eth": {
         "name": "Ethereum",
+        "gas": "ETH",
         "id": 1,
         "rpc": "https://ethereum-rpc.publicnode.com",
         "blockscout": "https://eth.blockscout.com/api",
@@ -63,6 +64,7 @@ CHAINS = {
     },
     "bsc": {
         "name": "BNB Chain",
+        "gas": "BNB",
         "id": 56,
         "rpc": "https://bsc-rpc.publicnode.com",
         "blockscout": None,
@@ -72,6 +74,7 @@ CHAINS = {
     },
     "arb": {
         "name": "Arbitrum",
+        "gas": "ETH",
         "id": 42161,
         "rpc": "https://arbitrum-one-rpc.publicnode.com",
         "blockscout": None,  # arbitrum.blockscout.com sits behind a Cloudflare challenge
@@ -231,7 +234,7 @@ def history(chain, addr, key, max_tx):
             dec = int(t.get("tokenDecimal") or 18)
             rows.append({"from": (t.get("from") or "").lower(), "to": (t.get("to") or "").lower(),
                          "value": int(t.get("value") or 0) / 10 ** dec,
-                         "symbol": t.get("tokenSymbol") or "native",
+                         "symbol": t.get("tokenSymbol") or cfg["gas"],
                          "token": (t.get("contractAddress") or "").lower() if action == "tokentx" else "",
                          "time": int(t.get("timeStamp") or 0), "hash": t.get("hash")})
         time.sleep(0.25)  # stay under free-tier rate limits
@@ -262,7 +265,7 @@ def native_balance(chain, addr):
 
 
 def print_exposure(chain, exp):
-    gas = {"eth": "ETH", "bsc": "BNB", "arb": "ETH"}[chain]
+    gas = CHAINS[chain]["gas"]
     if "skipped" in exp:
         print(f"   exposure     skipped: {exp['skipped']}")
         return
@@ -278,12 +281,18 @@ def print_exposure(chain, exp):
         print(f"                note: {failed} wallet histories could not be read; their share is untraced")
     if not exp["priced_natives"]:
         print(f"                note: no {gas} price, so only stablecoin transfers were counted")
+    for side, word in (("in", "from"), ("out", "to")):
+        for x in exp[side].get("crossings", [])[:3]:
+            print(f"                via Aori: {x['share'] * 100:.1f}% of {side}flow {word} "
+                  f"{x['address']} on {CHAINS[x['chain']]['name']}")
     order = ["severe", "high", "medium", "low", None]
     usd = inn["usd"] + out["usd"]
     rows = []
     for cat in set(inn["categories"]) | set(out["categories"]):
         ci, co = inn["categories"].get(cat, {}), out["categories"].get(cat, {})
         total = (ci.get("share", 0) * inn["usd"] + co.get("share", 0) * out["usd"]) / usd
+        if total < 0.0005:
+            continue  # prints as 0.0%; red-flag lines start at 0.1%
         direct = ci.get("direct", 0) + co.get("direct", 0)
         indirect = ci.get("indirect", 0) + co.get("indirect", 0)
         how = "direct+indirect" if direct and indirect else "direct" if direct else "indirect"
@@ -316,7 +325,7 @@ def main():
     p.add_argument("--details", action="store_true", help="also show gas balance and the latest transfers")
     p.add_argument("--hops", type=int, default=4, help="how many wallets away to trace exposure (0 = off)")
     p.add_argument("--budget", type=int, default=25,
-                   help="max wallets whose history is read per chain and direction during the trace")
+                   help="max wallets whose history is read per direction during each chain's trace")
     a = p.parse_args()
 
     addr = a.address.strip().lower()
@@ -442,7 +451,7 @@ def main():
             print(f"   exposure     {out['exposure_error']}")
         if "native_balance" in out:
             bal = out["native_balance"]
-            gas = {"eth": "ETH", "bsc": "BNB", "arb": "ETH"}[chain]
+            gas = CHAINS[chain]["gas"]
             print(f"   gas balance  {'?' if bal is None else f'{bal:.6g}'} {gas}")
         for t in out.get("recent", []):
             arrow = "<-" if t["dir"] == "in" else "->"

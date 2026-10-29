@@ -21,6 +21,9 @@ For each chain it checks:
    (sanctioned, mixer, stolen funds, exchange, bridge, DEX ...) or looks like a service (a
    contract, or a wallet that has sent thousands of transactions). Unlabelled contracts are
    named from their verified source code, so a bridge or swap aggregator shows by name.
+   Aori cross-chain swaps are followed instead of ending the trail: the
+   order on-chain names the sender on one chain and the recipient on the other, so the trace
+   jumps to that wallet and carries on there.
 
 ```
 $ python aml_check.py 0x... --details

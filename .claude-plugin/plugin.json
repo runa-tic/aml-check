@@ -1,8 +1,8 @@
 {
   "name": "aml-check",
   "displayName": "AML Check",
-  "version": "1.1.0",
-  "description": "Free AML screen for EVM wallet addresses: sanctions, USDT/USDC freezes, Tornado Cash contacts and multi-hop exposure through public labels on Ethereum, BNB Chain and Arbitrum",
+  "version": "1.2.0",
+  "description": "Free AML screen for EVM wallet addresses: sanctions, USDT/USDC freezes, Tornado Cash contacts and multi-hop, cross-chain exposure through public labels on Ethereum, BNB Chain and Arbitrum",
   "author": {
     "name": "runa-tic"
   },
