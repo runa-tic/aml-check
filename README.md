@@ -26,7 +26,13 @@ For each chain it checks:
    named from their verified source code, so a bridge or swap aggregator shows by name.
    Aori cross-chain swaps are followed instead of ending the trail: the
    order on-chain names the sender on one chain and the recipient on the other, so the trace
-   jumps to that wallet and carries on there.
+   jumps to that wallet and carries on there. Bridgers (Tron to BNB Chain) records no sender, so
+   a payout is paired with the deposit on the other chain by amount and time, only when exactly
+   one deposit fits, and the output marks that jump as probable. Measured on 120 Bridgers payouts,
+   real pairs land 70 to 110 seconds apart and keep 99.3% of the deposit.
+5. **Unknown source:** money that reached the address from a bridge or an unnamed contract the
+   trace cannot see past has no known source. The table marks it `unknown`, and when it is a
+   quarter or more of the inflow the verdict says so instead of reading as a pass.
 
 ```
 $ python aml_check.py 0x... --details
@@ -49,7 +55,8 @@ $ python aml_check.py 0x... --details
 VERDICT: no red flags in public data
 ```
 
-Exit code 0 means no red flags, 1 means a red flag, 2 means bad input or an error. `--json`
+Exit code 0 means no red flags, 1 means a red flag, 2 means bad input or an error. An unknown
+source is not a red flag, so it exits 0; `--json` reports it under `source_unknown`. `--json`
 prints the full result for scripts, and `--chains eth,arb` limits the run. A `0x` address is
 screened on the three EVM chains and a Tron `T...` address on Tron; `--chains` can add Tron for
 a `0x` address too, since both formats are the same 20-byte key. `--hops` sets how
@@ -100,9 +107,10 @@ counterparties that matter (an exchange hot wallet, say), and flags a wallet wit
 It sees only public data. The trace can follow money to a busy wallet and say "unnamed
 service", but naming it takes the clustered labels commercial tools keep for exchanges, scams
 and darknet markets, so an exchange's own check may rate an address higher. Most bridges pay
-out from their own wallets and record nothing on-chain about the sender, so apart from Aori a
-bridge ends the trail: the money's source on the other chain stays unknown, which is not the
-same as clean. A red flag here is real; a clean result means clean as far as public data shows. This is a screening aid, not legal or compliance advice.
+out from their own wallets and record nothing on-chain about the sender, so apart from Aori and
+the Bridgers pairing a bridge ends the trail: the money's source on the other chain stays
+unknown, which is not the same as clean. A probable pairing is a match on amount and time, not
+an on-chain record. A red flag here is real; a clean result means clean as far as public data shows. This is a screening aid, not legal or compliance advice.
 
 ## License
 

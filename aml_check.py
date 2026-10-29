@@ -102,6 +102,7 @@ CHAINS = {
     },
 }
 EVM_CHAINS = "eth,bsc,arb"
+UNKNOWN_LINE = 0.25   # share of inflow with an unknown source that the verdict calls out
 
 TRONGRID = "https://api.trongrid.io"
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
@@ -278,6 +279,21 @@ def etherscan_get(url, retries=4):
         time.sleep(1.0 * (attempt + 1))
 
 
+def etherscan_rows(chain, action, res):
+    """Etherscan account records -> history rows, skipping reverted transactions."""
+    rows = []
+    for t in res:
+        if t.get("isError") == "1":
+            continue  # reverted: the value never moved
+        dec = int(t.get("tokenDecimal") or 18)
+        rows.append({"from": (t.get("from") or "").lower(), "to": (t.get("to") or "").lower(),
+                     "value": int(t.get("value") or 0) / 10 ** dec, "raw": int(t.get("value") or 0),
+                     "symbol": t.get("tokenSymbol") or CHAINS[chain]["gas"],
+                     "token": (t.get("contractAddress") or "").lower() if action == "tokentx" else "",
+                     "time": int(t.get("timeStamp") or 0), "hash": t.get("hash")})
+    return rows
+
+
 def history(chain, addr, key, max_tx):
     """Returns (transfers, source, note). transfers: list of dicts with from/to/value/symbol."""
     cfg = CHAINS[chain]
@@ -307,15 +323,7 @@ def history(chain, addr, key, max_tx):
                 return None, src, f"{action}: {res[:120]}"
             continue
         truncated |= len(res) >= max_tx
-        for t in res:
-            if t.get("isError") == "1":
-                continue  # reverted: the value never moved
-            dec = int(t.get("tokenDecimal") or 18)
-            rows.append({"from": (t.get("from") or "").lower(), "to": (t.get("to") or "").lower(),
-                         "value": int(t.get("value") or 0) / 10 ** dec, "raw": int(t.get("value") or 0),
-                         "symbol": t.get("tokenSymbol") or cfg["gas"],
-                         "token": (t.get("contractAddress") or "").lower() if action == "tokentx" else "",
-                         "time": int(t.get("timeStamp") or 0), "hash": t.get("hash")})
+        rows += etherscan_rows(chain, action, res)
         time.sleep(0.25)  # stay under free-tier rate limits
     note = f"only the latest {max_tx} per type were read" if truncated else None
     return rows, src, note
@@ -339,6 +347,21 @@ def tron_pages(url, max_tx):
         out += r.get("data") or []
         url = (r.get("meta") or {}).get("links", {}).get("next")
     return out[:max_tx], bool(url)
+
+
+def tron_token_rows(toks):
+    """TronGrid TRC-20 records -> history rows."""
+    rows = []
+    for t in toks:
+        if t.get("type", "Transfer") != "Transfer":
+            continue  # the list also carries Approval events, often for 2**256 - 1
+        info = t.get("token_info") or {}
+        raw = int(t.get("value") or 0)
+        rows.append({"from": tron_addr(t.get("from")), "to": tron_addr(t.get("to")),
+                     "value": raw / 10 ** int(info.get("decimals") or 0), "raw": raw,
+                     "symbol": info.get("symbol") or "?", "token": tron_addr(info.get("address")),
+                     "time": int(t.get("block_timestamp") or 0) // 1000, "hash": t.get("transaction_id")})
+    return rows
 
 
 def tron_history(addr, max_tx):
@@ -371,15 +394,7 @@ def tron_history(addr, max_tx):
                              "time": int(t.get("block_timestamp") or 0) // 1000, "hash": t.get("txID")})
     toks, more = tron_pages(f"{TRONGRID}/v1/accounts/{b58}/transactions/trc20?limit={size}&only_confirmed=true", max_tx)
     truncated |= more
-    for t in toks:
-        if t.get("type", "Transfer") != "Transfer":
-            continue  # the list also carries Approval events, often for 2**256 - 1
-        info = t.get("token_info") or {}
-        raw = int(t.get("value") or 0)
-        rows.append({"from": tron_addr(t.get("from")), "to": tron_addr(t.get("to")),
-                     "value": raw / 10 ** int(info.get("decimals") or 0), "raw": raw,
-                     "symbol": info.get("symbol") or "?", "token": tron_addr(info.get("address")),
-                     "time": int(t.get("block_timestamp") or 0) // 1000, "hash": t.get("transaction_id")})
+    rows += tron_token_rows(toks)
     note = f"only the latest {max_tx} per type were read" if truncated else None
     return rows, "TronGrid", note
 
@@ -427,10 +442,13 @@ def print_exposure(chain, exp):
     if not exp["priced_natives"]:
         print(f"                note: no {gas} price, so only stablecoin transfers were counted")
     for side, word in (("in", "from"), ("out", "to")):
-        for x in exp[side].get("crossings", [])[:3]:
-            print(f"                via Aori: {x['share'] * 100:.1f}% of {side}flow {word} "
+        for x in exp[side].get("crossings", [])[:4]:
+            print(f"                via {x.get('via', 'Aori')}: {x['share'] * 100:.1f}% of {side}flow {word} "
                   f"{display(x['chain'], x['address'])} on {CHAINS[x['chain']]['name']}")
-    order = ["severe", "high", "medium", "low", None]
+    if any("probable" in x.get("via", "") for side in ("in", "out") for x in exp[side].get("crossings", [])):
+        print("                (probable: the bridge records no sender, so the two ends were paired by")
+        print("                amount and time; only one transfer fit)")
+    order = ["severe", "high", "medium", "unknown", "low", None]
     usd = inn["usd"] + out["usd"]
     rows = []
     for cat in set(inn["categories"]) | set(out["categories"]):
@@ -450,11 +468,12 @@ def print_exposure(chain, exp):
             if len(names) + len(n) > 70:
                 break
             names += (", " if names else "") + n
-        rows.append((order.index(exposure.RISK.get(cat)), -total, cat, ci, co, total, how, names))
+        risk = ci.get("risk") if ci.get("risk") == "unknown" else exposure.RISK.get(cat)
+        rows.append((order.index(risk), -total, cat, ci, co, total, how, names, risk))
     print("                  total     in    out  category          risk     how")
     pct = lambda c: f"{c['share'] * 100:5.1f}%" if c else "     -"
-    for _, _, cat, ci, co, total, how, names in sorted(rows):
-        risk = exposure.RISK.get(cat) or "-"
+    for _, _, cat, ci, co, total, how, names, risk in sorted(rows):
+        risk = risk or "-"
         mark = "!!" if risk in ("severe", "high") else "  "
         print(f"              {mark} {total * 100:5.1f}% {pct(ci)} {pct(co)}  {cat:<17} {risk:<8} {how}")
         if names:
@@ -561,7 +580,16 @@ def main():
                                  for t in sorted(rows, key=lambda t: -t["time"])[:10] if t["value"]]
         result["chains"][chain] = out
 
-    result["verdict"] = "RED FLAG" if red else "no red flags in public data"
+    # Inflow that ends at a bridge or an unnamed contract has a source no public data shows.
+    unknown = {c: o["exposure"]["in"]["unknown_source"] for c, o in result["chains"].items()
+               if "in" in o.get("exposure", {}) and o["exposure"]["in"].get("unknown_source", 0) >= UNKNOWN_LINE}
+    result["source_unknown"] = unknown
+    if red:
+        result["verdict"] = "RED FLAG"
+    elif unknown:
+        result["verdict"] = "no red flags in public data, but the source of the money is unknown"
+    else:
+        result["verdict"] = "no red flags in public data"
     if a.json:
         print(json.dumps(result, indent=2))
         return 1 if red else 0
@@ -614,6 +642,9 @@ def main():
                   f"{t['value']:.6g} {t['symbol']}  {arrow} {t['counterparty']}")
         print()
     print(f"VERDICT: {result['verdict']}")
+    for chain, share in unknown.items():
+        print(f"  {share * 100:.0f}% of the value that reached it on {CHAINS[chain]['name']} ends at a bridge or")
+        print("  contract that records no sender. That is unknown, not clean.")
     print("Public-data screen only: sanctions, stablecoin freezes, Tornado Cash and public explorer")
     print("labels. Paid tools cluster and label far more wallets, so they can still rate it higher.\n")
     return 1 if red else 0

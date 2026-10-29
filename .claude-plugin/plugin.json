@@ -1,7 +1,7 @@
 {
   "name": "aml-check",
   "displayName": "AML Check",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Free AML screen for wallet addresses: sanctions, USDT/USDC freezes, Tornado Cash contacts and multi-hop, cross-chain exposure through public labels on Ethereum, BNB Chain, Arbitrum and Tron",
   "author": {
     "name": "runa-tic"

@@ -38,13 +38,19 @@ anything flagged. Keep it short when the address is fresh.
   not that it is clean. "untraced" is value the trace did not follow (hop limit, budget, failed
   reads), not value known to be clean. A "via Aori" line means the money crossed chains in an
   Aori swap and the trace followed the order to the wallet at the other end; name that wallet
-  and its chain. The order proves who sent to whom, not that both wallets have one owner.
+  and its chain. The order proves who sent to whom, not that both wallets have one owner. A
+  "via Bridgers, probable" line means the bridge recorded no sender and the trace paired its
+  payout with the only deposit on the other chain that fits by amount and time: report it as a
+  probable link, never as proven.
   Exposure runs one way: an inflow carries the sender's own sources, not the places the sender
   paid later, so a wallet funded by a flagged wallet is not tainted by where that wallet's other
   money went. A trail that ends at a bridge (other than an Aori crossing) means the source on
   the other chain is unknown, not that it is clean: say which bridge, and that the money came
   from another chain. On Tron no public labels name exchanges, so "unnamed service" there is
   usually an exchange; sanctions on Tron come from the OFAC list only.
+- **Unknown source.** A row with risk `unknown`, or a verdict that says the source is unknown,
+  means the money came out of a bridge or an unnamed contract the trace could not see past. Say
+  that the source is unknown, not that the address is clean.
 - **Gas.** If the address holds stablecoins but 0 of the chain's gas token, say so: the funds are
   safe but can't move until some ETH or BNB arrives.
 - **Explain red flags plainly.** A sanctioned or frozen address is a hard stop. Contact with

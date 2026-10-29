@@ -21,7 +21,10 @@ How a trace works, for the incoming side (the outgoing side is the mirror image)
      as "untraced".
 Cross-chain swaps that write both ends on-chain are the exception to step 3: an Aori order names
 the sender on one chain and the recipient on the other, so the trail jumps chains there instead
-of ending at the bridge.
+of ending at the bridge. Bridges in BRIDGE_PAIRS record nothing about the sender, so their two
+ends are paired by amount and time, and only when a single transfer fits; that jump is reported
+as probable. Inflow that still ends at a bridge or an unnamed contract is reported as having an
+unknown source, not a low-risk one.
 Native coins are valued at today's price, so shares across months of history are approximate.
 """
 import csv
@@ -117,11 +120,33 @@ LZ_EID = {30101: "eth", 30102: "bsc", 30110: "arb"}
 LZ_NAME = {30101: "Ethereum", 30102: "BNB Chain", 30106: "Avalanche", 30109: "Polygon",
            30110: "Arbitrum", 30111: "Optimism", 30184: "Base"}
 
+# Bridges that pay out from their own wallets record nothing on-chain about who sent the money,
+# so their two ends can only be paired by amount and time: a deposit on one chain, then a payout
+# on the other `delay` seconds later at most, worth between (1 - fee) and all of the deposit.
+# A pair counts only when exactly one transfer fits; the link is probable, not proven. Measured
+# on 120 Bridgers payouts (2026-10): real pairs land 70-110 s apart and keep 99.3% of the deposit.
+BRIDGE_PAIRS = [
+    {"name": "Bridgers", "delay": 150, "fee": 0.01,
+     "deposit": {"tron": ["TJ4KeiGTvTX4wRUgLARiwr8rGLaurmVkdZ"]},
+     "payout": {"bsc": ["0xc1d13492285eb664951e201bf7c80c7c6318a1b5"]}},
+]
+# Inflow that ends at one of these came from somewhere the trace cannot see.
+UNKNOWN_SOURCE = ("bridge", "smart contract")
+
 # Smart-contract wallets (Safe, ERC-4337 accounts) belong to a person: trace through them.
 WALLET_NAME = re.compile(r"safe|gnosis|msca|lightaccount|kernel|simpleaccount|smartwallet|smartaccount|"
                          r"multisig|wallet", re.I)
 
 _labels = None
+_pair_ends = None
+
+
+def to_hex(addr):
+    """A label or pair address in the form the trace uses: lower-case hex, Tron converted."""
+    if addr.startswith("T"):
+        import aml_check
+        return aml_check.tron_hex(addr)
+    return addr.lower()
 
 
 def load_labels():
@@ -131,16 +156,23 @@ def load_labels():
     if _labels is None:
         _labels = {}
         if os.path.isfile(LABELS_FILE):
-            import aml_check
             with open(LABELS_FILE, encoding="utf-8", newline="") as f:
                 for r in csv.DictReader(f):
-                    a = r["address"]
-                    if a.startswith("T"):
-                        a = aml_check.tron_hex(a)
-                        if not a:
-                            continue
-                    _labels[(a, r["chain"])] = (r["category"], r["name"])
+                    a = to_hex(r["address"])
+                    if a:
+                        _labels[(a, r["chain"])] = (r["category"], r["name"])
+        for (c, a), (pair, role) in pair_ends().items():
+            _labels.setdefault((a, c), ("bridge", f"{pair['name']} ({role})"))
     return _labels
+
+
+def pair_ends():
+    """{(chain, address): (bridge pair, "deposit" or "payout")} for BRIDGE_PAIRS."""
+    global _pair_ends
+    if _pair_ends is None:
+        _pair_ends = {(c, to_hex(a)): (p, role) for p in BRIDGE_PAIRS
+                      for role in ("deposit", "payout") for c, addrs in p[role].items() for a in addrs}
+    return _pair_ends
 
 
 def label_for(chain, addr):
@@ -459,6 +491,69 @@ def cross(api, chain, bridge, txs, node, direction, key):
     return out
 
 
+def tron_busy(api, addr):
+    """True when a Tron wallet has more token transfers than a traced wallet's history holds,
+    the same test that marks a wallet read during the trace as a service."""
+    url = (f"{api.TRONGRID}/v1/accounts/{api.display('tron', addr)}/transactions/trc20"
+           f"?limit=200&only_confirmed=true")
+    try:
+        return api.tron_pages(url, NODE_MAX_TX)[1]
+    except Exception:
+        return False
+
+
+def window(api, chain, addr, t0, t1, key):
+    """Token transfers of `addr` between times t0 and t1, as history rows ([] if unreadable)."""
+    try:
+        if api.CHAINS[chain].get("kind") == "tron":
+            url = (f"{api.TRONGRID}/v1/accounts/{api.display(chain, addr)}/transactions/trc20?limit=200"
+                   f"&only_confirmed=true&min_timestamp={t0 * 1000}&max_timestamp={t1 * 1000}")
+            return api.tron_token_rows(api.tron_pages(url, 1000)[0])
+        if not key:
+            return []
+        base = "https://api.etherscan.io/v2/api?"
+        blocks = []
+        for t, closest in ((t0, "after"), (t1, "before")):
+            q = {"chainid": api.CHAINS[chain]["id"], "module": "block", "action": "getblocknobytime",
+                 "timestamp": t, "closest": closest, "apikey": key}
+            blocks.append(int(api.etherscan_get(base + urllib.parse.urlencode(q))["result"]))
+            time.sleep(0.25)
+        q = {"chainid": api.CHAINS[chain]["id"], "module": "account", "action": "tokentx", "address": addr,
+             "startblock": blocks[0], "endblock": blocks[1], "page": 1, "offset": 1000, "sort": "asc",
+             "apikey": key}
+        res = api.etherscan_get(base + urllib.parse.urlencode(q)).get("result")
+        return api.etherscan_rows(chain, "tokentx", res) if isinstance(res, list) else []
+    except Exception:
+        return []
+
+
+def bridge_far_end(api, chain, pair, row, direction, key):
+    """The other end of a bridge transfer `row` (a payout to the trail when tracing inflow, a
+    deposit from it when tracing outflow), paired by stablecoin amount and time: (chain, hash,
+    time, wallet, bridge address there), or None unless exactly one transfer fits."""
+    if PRICED_TOKENS[chain].get(row["token"]) != "usd" or row["value"] <= 0:
+        return None
+    side, found = ("deposit", "payout")[direction == "out"], {}
+    t0, t1 = ((row["time"] - pair["delay"], row["time"]) if direction == "in"
+              else (row["time"], row["time"] + pair["delay"]))
+    for c2, addrs in pair[side].items():
+        if c2 == chain or c2 not in api.CHAINS:
+            continue
+        for a in map(to_hex, addrs):
+            for r in window(api, c2, a, t0, t1, key):
+                if PRICED_TOKENS[c2].get(r["token"]) != "usd" or r["from"] == r["to"]:
+                    continue
+                if direction == "in" and r["to"] == a:
+                    dep, pay, wallet = r["value"], row["value"], r["from"]
+                elif direction == "out" and r["from"] == a:
+                    dep, pay, wallet = row["value"], r["value"], r["to"]
+                else:
+                    continue
+                if dep > 0 and 1 - pair["fee"] <= pay / dep <= 1:
+                    found[r["hash"]] = (c2, r["hash"], r["time"], wallet, a)
+    return next(iter(found.values())) if len(found) == 1 else None
+
+
 def trace(api, chain, target, rows, direction, key, hops, budget, prices):
     """Exposure of `target` on one side. Returns a dict with the USD total and category shares.
 
@@ -486,7 +581,7 @@ def trace(api, chain, target, rows, direction, key, hops, budget, prices):
     # A trail item: (chain, address, weight, depth, time bound, path, {tx hash: [weight, time]}
     # of the transfers between it and `prev`, prev, (raw amount, token) when it was reached
     # through a cross-chain order and its end of the order still has to be found).
-    cache, known, replays = {(chain, target): rows}, {}, {}
+    cache, known, replays, edge_checks = {(chain, target): rows}, {}, {}, [0]
     level = [(chain, a, v / total, 1, t, ((chain, target),), scaled(etx, 1 / total), target, None)
              for a, (v, t, etx) in start.items()]
     while level:
@@ -519,8 +614,28 @@ def trace(api, chain, target, rows, direction, key, hops, budget, prices):
                     if c2 is None:
                         book("bridge", f"{lab[1]} via {cname}", wt, depth, c)
                         continue
-                    crossings[(c2, other)] += wt
+                    crossings[(c2, other, "Aori")] += wt
                     nxt.append((c2, other, wt, depth, t, path + (node,), {}, None, m))
+                if left > 1e-12:
+                    book(lab[0], lab[1], left, depth, c)
+                continue
+            end = pair_ends().get(node)
+            if end and end[1] == ("payout", "deposit")[direction == "out"] and txs and prev:
+                # A bridge that records no sender: pair this end with the other by amount and time.
+                pair, left = end[0], w
+                mine = cache.get((c, prev)) or []
+                ends = (addr, prev) if direction == "in" else (prev, addr)
+                for h in sorted(txs, key=lambda h: -txs[h][0])[:MAX_CROSS_TX]:
+                    row = next((r for r in mine if r["hash"] == h and (r["from"], r["to"]) == ends
+                                and PRICED_TOKENS[c].get(r["token"]) == "usd"), None)
+                    far = bridge_far_end(api, c, pair, row, direction, key) if row else None
+                    if not far:
+                        continue
+                    c2, h2, t2, wallet, there = far
+                    left -= txs[h][0]
+                    crossings[(c2, wallet, f"{pair['name']}, probable")] += txs[h][0]
+                    nxt.append((c2, wallet, txs[h][0], depth, t2, path + (node,), {h2: [txs[h][0], t2]},
+                                there, None))
                 if left > 1e-12:
                     book(lab[0], lab[1], left, depth, c)
                 continue
@@ -528,6 +643,15 @@ def trace(api, chain, target, rows, direction, key, hops, budget, prices):
                 book(lab[0], lab[1], w, depth, c)
                 continue
             if depth >= hops or w < MIN_WEIGHT or node in path:
+                if (depth >= hops and w >= MIN_WEIGHT and node not in path and edge_checks[0] < MAX_LOOKUPS
+                        and api.CHAINS[c].get("kind") == "tron"):
+                    # Tron has no transaction count to spot a service by, so at the hop limit a
+                    # wallet carrying real weight gets one short history read instead.
+                    edge_checks[0] += 1
+                    if tron_busy(api, addr):
+                        known[node] = ("unnamed service", short(addr, api, c))
+                        book(known[node][0], known[node][1], w, depth, c)
+                        continue
                 book("untraced", None, w, depth, c)
                 continue
             if node not in cache:
@@ -572,12 +696,15 @@ def trace(api, chain, target, rows, direction, key, hops, budget, prices):
 
     for cat, c in cats.items():
         names = sorted(c["names"].items(), key=lambda kv: -kv[1])
+        unknown = direction == "in" and cat in UNKNOWN_SOURCE
         result["categories"][cat] = {
             "share": c["direct"] + c["indirect"], "direct": c["direct"], "indirect": c["indirect"],
-            "risk": RISK.get(cat), "names": [[n, w] for n, w in names[:3]],
+            "risk": "unknown" if unknown else RISK.get(cat), "names": [[n, w] for n, w in names[:3]],
         }
-    result["crossings"] = [{"chain": c2, "address": a, "share": w}
-                           for (c2, a), w in sorted(crossings.items(), key=lambda kv: -kv[1])]
+    result["unknown_source"] = sum(v["share"] for k, v in result["categories"].items()
+                                   if direction == "in" and k in UNKNOWN_SOURCE)
+    result["crossings"] = [{"chain": c2, "address": a, "via": via, "share": w}
+                           for (c2, a, via), w in sorted(crossings.items(), key=lambda kv: -kv[1])]
     return result
 
 
