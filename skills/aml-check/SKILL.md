@@ -1,6 +1,6 @@
 ---
 name: aml-check
-description: Screen an EVM wallet address for AML risk (sanctions, USDT/USDC freezes, Tornado Cash, sanctioned contacts, and value-weighted exposure traced several hops through public labels) on Ethereum, BNB Chain and Arbitrum. Use whenever the user sends an EVM address (0x followed by 40 hex characters), on its own or with words like check, AML, clean, safe, screen, sanctioned or frozen, or asks whether a wallet is safe to send to or receive from.
+description: Screen a wallet address for AML risk (sanctions, USDT/USDC freezes, Tornado Cash, sanctioned contacts, and value-weighted exposure traced several hops through public labels, across chains through Aori swaps) on Ethereum, BNB Chain, Arbitrum and Tron. Use whenever the user sends an EVM address (0x followed by 40 hex characters) or a Tron address (T followed by 33 base58 characters), on its own or with words like check, AML, clean, safe, screen, sanctioned or frozen, or asks whether a wallet is safe to send to or receive from.
 ---
 
 # AML check
@@ -23,7 +23,7 @@ anything flagged. Keep it short when the address is fresh.
 - **Name the counterparties that matter.** For the senders of the latest inbound transfers, and
   for every flagged address, look up the public name tag with WebFetch on
   `https://etherscan.io/address/<counterparty>` (Arbitrum: `arbiscan.io`, BNB Chain:
-  `bscscan.com`). An exchange hot wallet ("MEXC 16", "Binance 14") is the expected source of a
+  `bscscan.com`, Tron: `tronscan.org/#/address/<counterparty>`). An exchange hot wallet ("MEXC 16", "Binance 14") is the expected source of a
   withdrawal and worth saying out loud. Skip the lookup when there are no transfers. BscScan and
   Arbiscan often refuse automated fetches; an etherscan.io page then describes the address on
   Ethereum only, and the same address can be a contract on another chain, so don't call it a
@@ -41,7 +41,10 @@ anything flagged. Keep it short when the address is fresh.
   and its chain. The order proves who sent to whom, not that both wallets have one owner.
   Exposure runs one way: an inflow carries the sender's own sources, not the places the sender
   paid later, so a wallet funded by a flagged wallet is not tainted by where that wallet's other
-  money went.
+  money went. A trail that ends at a bridge (other than an Aori crossing) means the source on
+  the other chain is unknown, not that it is clean: say which bridge, and that the money came
+  from another chain. On Tron no public labels name exchanges, so "unnamed service" there is
+  usually an exchange; sanctions on Tron come from the OFAC list only.
 - **Gas.** If the address holds stablecoins but 0 of the chain's gas token, say so: the funds are
   safe but can't move until some ETH or BNB arrives.
 - **Explain red flags plainly.** A sanctioned or frozen address is a hard stop. Contact with
@@ -61,4 +64,6 @@ address, tell them to treat it as compromised and move the funds.
 
 The Etherscan key comes from `ETHERSCAN_API_KEY` or the file `~/.config/aml-check/etherscan_key`.
 If the output says contacts need a key, tell the user to get a free one at
-etherscan.io/myapikey and save it to that file. Never put the key on a command line.
+etherscan.io/myapikey and save it to that file. Tron needs no key; an optional free TronGrid
+key in `~/.config/aml-check/trongrid_key` makes Tron scans faster. Never put a key on a
+command line.

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Free AML screen for an EVM address (Ethereum, BNB Chain, Arbitrum).
+"""Free AML screen for an EVM address (Ethereum, BNB Chain, Arbitrum) or a Tron address.
 
 Checks, per chain:
-  1. Sanctions  - Chainalysis on-chain sanctions oracle (OFAC SDN etc.), free, no key.
+  1. Sanctions  - Chainalysis on-chain sanctions oracle (OFAC SDN etc.), free, no key; on Tron,
+                  which has no oracle, the OFAC SDN list's TRX addresses.
   2. Freezes    - is the address frozen by the USDT / USDC contracts on that chain.
   3. Contacts   - every address it has transacted with, screened for sanctions,
                   stablecoin freezes and Tornado Cash contracts.
@@ -13,6 +14,8 @@ Check 3 needs transaction history:
   arb - Etherscan V2 with a free key (ETHERSCAN_API_KEY)
   bsc - Etherscan V2 with a PAID key (Etherscan dropped BNB from the free tier in 2025); the
         key is tried as is, and BNB Chain is skipped if Etherscan refuses it
+  tron - TronGrid, keyless (3 requests a second); an optional free TronGrid key in
+        TRONGRID_API_KEY or ~/.config/aml-check/trongrid_key raises the limit
 A free key (etherscan.io/myapikey) covers eth + arb at 5 req/s. It is read from
 ETHERSCAN_API_KEY, else from ~/.config/aml-check/etherscan_key.
 
@@ -31,9 +34,12 @@ Exit code: 0 = nothing found, 1 = red flag found, 2 = error.
 This is public-data screening only; it is not what an exchange's own vendor will see.
 """
 import argparse
+import functools
+import hashlib
 import json
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -82,7 +88,52 @@ CHAINS = {
         "freeze": [("USDT0", "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", SEL_USDT0),
                    ("USDC", "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", SEL_CIRCLE)],
     },
+    # Tron runs the EVM with its own address format (base58 "T..."). Addresses are handled in
+    # their 20-byte hex form inside the program and shown as base58. TronGrid's JSON-RPC answers
+    # eth_call and eth_getCode; history comes from its REST API. There is no Chainalysis oracle
+    # on Tron, so sanctions come from the OFAC SDN list in labels.csv.
+    "tron": {
+        "name": "Tron",
+        "gas": "TRX",
+        "decimals": 6,
+        "kind": "tron",
+        "rpc": "https://api.trongrid.io/jsonrpc",
+        "freeze": [("USDT", "0xa614f803b6fd780986a42c78ec9c7f77e6ded13c", SEL_USDT_LEGACY)],
+    },
 }
+EVM_CHAINS = "eth,bsc,arb"
+
+TRONGRID = "https://api.trongrid.io"
+B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+
+def tron_hex(b58):
+    """'T...' base58check -> '0x' + 40 hex, or None if it is not a valid Tron address."""
+    try:
+        n = 0
+        for ch in b58:
+            n = n * 58 + B58.index(ch)
+        raw = n.to_bytes(25, "big")
+    except (ValueError, OverflowError):
+        return None
+    if raw[0] != 0x41 or hashlib.sha256(hashlib.sha256(raw[:21]).digest()).digest()[:4] != raw[21:]:
+        return None
+    return "0x" + raw[1:21].hex()
+
+
+def tron_b58(hexaddr):
+    raw = b"\x41" + bytes.fromhex(hexaddr[2:])
+    raw += hashlib.sha256(hashlib.sha256(raw).digest()).digest()[:4]
+    n, out = int.from_bytes(raw, "big"), ""
+    while n:
+        n, r = divmod(n, 58)
+        out = B58[r] + out
+    return out
+
+
+def display(chain, addr):
+    """An address the way that chain's explorers write it."""
+    return tron_b58(addr) if CHAINS[chain].get("kind") == "tron" and addr else addr
 
 # Tornado Cash contracts. Names verified against explorer contract names (eth); pool
 # bytecode on BSC/Arbitrum matches across chains. OFAC delisted Tornado in 2025, so the
@@ -113,20 +164,40 @@ TORNADO = {
 
 
 def tornado_label(chain, addr):
-    return TORNADO.get(chain, {}).get(addr) or (TORNADO["_multichain"].get(addr) if chain != "eth" else None)
+    return TORNADO.get(chain, {}).get(addr) or (TORNADO["_multichain"].get(addr) if chain in ("bsc", "arb") else None)
+
+
+_tron_lock, _tron_last = threading.Lock(), [0.0]
+
+
+def tron_pace():
+    """TronGrid without a key allows 3 requests a second and suspends the caller for 5 s after a
+    burst; with a key (TRONGRID_API_KEY or ~/.config/aml-check/trongrid_key) it allows far more."""
+    gap = 0.1 if load_key("trongrid") else 0.4
+    with _tron_lock:
+        wait = _tron_last[0] + gap - time.time()
+        if wait > 0:
+            time.sleep(wait)
+        _tron_last[0] = time.time()
 
 
 def http_json(url, body=None, retries=3):
     data = json.dumps(body).encode() if body is not None else None
+    headers = dict(UA)
+    tron = url.startswith(TRONGRID)
+    if tron and load_key("trongrid"):
+        headers["TRON-PRO-API-KEY"] = load_key("trongrid")
     for attempt in range(retries):
         try:
-            req = urllib.request.Request(url, data=data, headers=UA)
+            if tron:
+                tron_pace()
+            req = urllib.request.Request(url, data=data, headers=headers)
             with urllib.request.urlopen(req, timeout=30) as r:
                 return json.loads(r.read())
         except urllib.error.HTTPError as e:
             if attempt == retries - 1:
                 raise
-            time.sleep((5 if e.code == 429 else 1.5) * (attempt + 1))
+            time.sleep((6 if e.code == 429 else 1.5) * (attempt + 1))
         except Exception:
             if attempt == retries - 1:
                 raise
@@ -172,10 +243,12 @@ def eth_calls(chain, calls):
 def screen(chain, addrs):
     """For each address: sanctioned?, frozen by which stablecoins?, Tornado label."""
     cfg = CHAINS[chain]
+    tron = cfg.get("kind") == "tron"
     calls, index = [], []
     for a in addrs:
-        calls.append((ORACLE, "0x" + SEL_IS_SANCTIONED + word(a)))
-        index.append((a, "sanctions"))
+        if not tron:
+            calls.append((ORACLE, "0x" + SEL_IS_SANCTIONED + word(a)))
+            index.append((a, "sanctions"))
         for sym, token, sel in cfg["freeze"]:
             calls.append((token, "0x" + sel + word(a)))
             index.append((a, sym))
@@ -189,6 +262,10 @@ def screen(chain, addrs):
             report[a]["unchecked"].append(what)
         elif val:
             report[a]["frozen_by"].append(what)
+    if tron:
+        for a in addrs:
+            lab = exposure.label_for(chain, a)
+            report[a]["sanctioned"] = bool(lab and lab[0] == "sanctioned")
     return report
 
 
@@ -204,6 +281,8 @@ def etherscan_get(url, retries=4):
 def history(chain, addr, key, max_tx):
     """Returns (transfers, source, note). transfers: list of dicts with from/to/value/symbol."""
     cfg = CHAINS[chain]
+    if cfg.get("kind") == "tron":
+        return tron_history(addr, max_tx)
     if key:
         base, src = "https://api.etherscan.io/v2/api", "Etherscan"
         extra = {"chainid": cfg["id"], "apikey": key}
@@ -242,18 +321,84 @@ def history(chain, addr, key, max_tx):
     return rows, src, note
 
 
+def tron_addr(a):
+    """A TronGrid address field (hex '41...' or base58 'T...') -> '0x' + 40 hex."""
+    a = a or ""
+    if len(a) == 42 and a.startswith("41"):
+        return "0x" + a[2:].lower()
+    return tron_hex(a) or ""
+
+
+def tron_pages(url, max_tx):
+    """Up to max_tx records from a paged TronGrid v1 list. Returns (records, truncated)."""
+    out = []
+    while url and len(out) < max_tx:
+        r = http_json(url)
+        if not r.get("success", True):
+            raise RuntimeError(str(r.get("error") or r)[:120])
+        out += r.get("data") or []
+        url = (r.get("meta") or {}).get("links", {}).get("next")
+    return out[:max_tx], bool(url)
+
+
+def tron_history(addr, max_tx):
+    """TRX and TRC-20 transfers from TronGrid, in the same row format as history()."""
+    b58 = tron_b58(addr)
+    size = min(200, max_tx)
+    rows, truncated = [], False
+    txs, more = tron_pages(f"{TRONGRID}/v1/accounts/{b58}/transactions?limit={size}&only_confirmed=true", max_tx)
+    truncated |= more
+    for t in txs:
+        if (t.get("ret") or [{}])[0].get("contractRet", "SUCCESS") != "SUCCESS":
+            continue  # reverted: the value never moved
+        for c in (t.get("raw_data") or {}).get("contract") or []:
+            v = (c.get("parameter") or {}).get("value") or {}
+            if c.get("type") == "TransferContract":
+                raw, to = int(v.get("amount") or 0), v.get("to_address")
+            elif c.get("type") == "TriggerSmartContract":
+                raw, to = int(v.get("call_value") or 0), v.get("contract_address")
+            else:
+                continue
+            if raw:
+                rows.append({"from": tron_addr(v.get("owner_address")), "to": tron_addr(to),
+                             "value": raw / 1e6, "raw": raw, "symbol": "TRX", "token": "",
+                             "time": int(t.get("block_timestamp") or 0) // 1000, "hash": t.get("txID")})
+        for it in t.get("internal_transactions") or []:
+            raw = int(((it.get("data") or {}).get("call_value") or {}).get("_") or 0)
+            if raw and not it.get("data", {}).get("rejected"):
+                rows.append({"from": tron_addr(it.get("from_address")), "to": tron_addr(it.get("to_address")),
+                             "value": raw / 1e6, "raw": raw, "symbol": "TRX", "token": "",
+                             "time": int(t.get("block_timestamp") or 0) // 1000, "hash": t.get("txID")})
+    toks, more = tron_pages(f"{TRONGRID}/v1/accounts/{b58}/transactions/trc20?limit={size}&only_confirmed=true", max_tx)
+    truncated |= more
+    for t in toks:
+        if t.get("type", "Transfer") != "Transfer":
+            continue  # the list also carries Approval events, often for 2**256 - 1
+        info = t.get("token_info") or {}
+        raw = int(t.get("value") or 0)
+        rows.append({"from": tron_addr(t.get("from")), "to": tron_addr(t.get("to")),
+                     "value": raw / 10 ** int(info.get("decimals") or 0), "raw": raw,
+                     "symbol": info.get("symbol") or "?", "token": tron_addr(info.get("address")),
+                     "time": int(t.get("block_timestamp") or 0) // 1000, "hash": t.get("transaction_id")})
+    note = f"only the latest {max_tx} per type were read" if truncated else None
+    return rows, "TronGrid", note
+
+
 def fmt_time(ts):
     return time.strftime("%Y-%m-%d", time.gmtime(ts)) if ts else "?"
 
 
-KEY_FILE = os.path.join(os.path.expanduser("~"), ".config", "aml-check", "etherscan_key")
+KEY_DIR = os.path.join(os.path.expanduser("~"), ".config", "aml-check")
 
 
-def load_key():
-    """ETHERSCAN_API_KEY, else the key file, so a caller never has to put the key on a command line."""
-    key = os.environ.get("ETHERSCAN_API_KEY", "").strip()
-    if not key and os.path.isfile(KEY_FILE):
-        with open(KEY_FILE, encoding="utf-8") as f:
+@functools.lru_cache(maxsize=None)
+def load_key(name="etherscan"):
+    """<NAME>_API_KEY, else ~/.config/aml-check/<name>_key, so a caller never has to put the key
+    on a command line."""
+    key = os.environ.get(f"{name.upper()}_API_KEY", "").strip()
+    path = os.path.join(KEY_DIR, f"{name}_key")
+    if not key and os.path.isfile(path):
+        with open(path, encoding="utf-8") as f:
             key = f.read().strip()
     return key or None
 
@@ -261,7 +406,7 @@ def load_key():
 def native_balance(chain, addr):
     r = http_json(CHAINS[chain]["rpc"], {"jsonrpc": "2.0", "id": 1, "method": "eth_getBalance",
                                          "params": [addr, "latest"]})
-    return int(r["result"], 16) / 1e18
+    return int(r["result"], 16) / 10 ** CHAINS[chain].get("decimals", 18)
 
 
 def print_exposure(chain, exp):
@@ -284,7 +429,7 @@ def print_exposure(chain, exp):
     for side, word in (("in", "from"), ("out", "to")):
         for x in exp[side].get("crossings", [])[:3]:
             print(f"                via Aori: {x['share'] * 100:.1f}% of {side}flow {word} "
-                  f"{x['address']} on {CHAINS[x['chain']]['name']}")
+                  f"{display(x['chain'], x['address'])} on {CHAINS[x['chain']]['name']}")
     order = ["severe", "high", "medium", "low", None]
     usd = inn["usd"] + out["usd"]
     rows = []
@@ -317,9 +462,10 @@ def print_exposure(chain, exp):
 
 
 def main():
-    p = argparse.ArgumentParser(description="Free AML screen for an EVM address.")
-    p.add_argument("address")
-    p.add_argument("--chains", default="eth,bsc,arb", help="comma list from: eth,bsc,arb")
+    p = argparse.ArgumentParser(description="Free AML screen for an EVM or Tron address.")
+    p.add_argument("address", help="0x... (EVM) or T... (Tron)")
+    p.add_argument("--chains", default=None,
+                   help=f"comma list from: eth,bsc,arb,tron (default {EVM_CHAINS} for 0x, tron for T...)")
     p.add_argument("--max-tx", type=int, default=1000, help="max records per history type (free Etherscan caps at 1000)")
     p.add_argument("--json", action="store_true", help="print machine-readable result")
     p.add_argument("--details", action="store_true", help="also show gas balance and the latest transfers")
@@ -328,18 +474,26 @@ def main():
                    help="max wallets whose history is read per direction during each chain's trace")
     a = p.parse_args()
 
-    addr = a.address.strip().lower()
-    if not (addr.startswith("0x") and len(addr) == 42 and all(c in "0123456789abcdef" for c in addr[2:])):
-        print("not an EVM address (expected 0x + 40 hex chars)", file=sys.stderr)
-        return 2
+    given = a.address.strip()
+    if given.startswith("T"):
+        # A Tron address is the same 20 bytes as an EVM one, so it can be screened on any chain.
+        addr, default = tron_hex(given), "tron"
+        if not addr:
+            print("not a valid Tron address (base58 checksum failed)", file=sys.stderr)
+            return 2
+    else:
+        addr, default = given.lower(), EVM_CHAINS
+        if not (addr.startswith("0x") and len(addr) == 42 and all(c in "0123456789abcdef" for c in addr[2:])):
+            print("not an address (expected 0x + 40 hex chars, or a Tron T... address)", file=sys.stderr)
+            return 2
     key = load_key()
-    chains = [c.strip() for c in a.chains.split(",") if c.strip()]
+    chains = [c.strip() for c in (a.chains or default).split(",") if c.strip()]
     bad = [c for c in chains if c not in CHAINS]
     if bad:
         print(f"unknown chain(s): {', '.join(bad)}", file=sys.stderr)
         return 2
 
-    result, red = {"address": addr, "chains": {}}, False
+    result, red = {"address": given if given.startswith("T") else addr, "chains": {}}, False
     for chain in chains:
         cfg = CHAINS[chain]
         out = {}
@@ -388,7 +542,7 @@ def main():
                     if r["tornado"]:
                         why.append(r["tornado"])
                     if why:
-                        flags.append({"address": other, "why": why, **stats[other]})
+                        flags.append({"address": display(chain, other), "why": why, **stats[other]})
             out["transfers"] = len(rows)
             out["counterparties"] = len(stats)
             out["first_seen"] = fmt_time(min((t["time"] for t in rows), default=0))
@@ -402,7 +556,7 @@ def main():
                     out["exposure_error"] = f"trace failed ({e})"
             if a.details:
                 out["recent"] = [{"time": t["time"], "dir": "in" if t["to"] == addr else "out",
-                                  "counterparty": t["from"] if t["to"] == addr else t["to"],
+                                  "counterparty": display(chain, t["from"] if t["to"] == addr else t["to"]),
                                   "value": t["value"], "symbol": t["symbol"], "hash": t["hash"]}
                                  for t in sorted(rows, key=lambda t: -t["time"])[:10] if t["value"]]
         result["chains"][chain] = out
@@ -412,7 +566,7 @@ def main():
         print(json.dumps(result, indent=2))
         return 1 if red else 0
 
-    print(f"\nAML screen for {addr}\n")
+    print(f"\nAML screen for {result['address']}\n")
     for chain, out in result["chains"].items():
         name = CHAINS[chain]["name"]
         print(f"== {name}")
@@ -421,7 +575,8 @@ def main():
             continue
         s = out["self"]
         sanc = {True: "SANCTIONED", False: "not sanctioned", None: "could not check"}[s["sanctioned"]]
-        print(f"   sanctions    {sanc}  (Chainalysis oracle)")
+        src = "OFAC SDN list" if CHAINS[chain].get("kind") == "tron" else "Chainalysis oracle"
+        print(f"   sanctions    {sanc}  ({src})")
         if CHAINS[chain]["freeze"]:
             checked = [sym for sym, _, _ in CHAINS[chain]["freeze"] if sym not in s["unchecked"]]
             frozen = ", ".join(s["frozen_by"]) or "none"

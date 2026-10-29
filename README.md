@@ -1,16 +1,17 @@
 # aml-check
 
-A free AML screen for EVM wallet addresses on Ethereum, BNB Chain and Arbitrum. Paid tools
+A free AML screen for wallet addresses on Ethereum, BNB Chain, Arbitrum and Tron. Paid tools
 score an address against private databases; this one answers the questions that public data
 can answer, and says plainly where it stops.
 
 For each chain it checks:
 
 1. **Sanctions:** the [Chainalysis sanctions oracle](https://go.chainalysis.com/chainalysis-oracle-docs.html),
-   an on-chain contract that mirrors the OFAC SDN list and is free to call.
+   an on-chain contract that mirrors the OFAC SDN list and is free to call. Tron has no oracle,
+   so there the TRX addresses on the OFAC SDN list itself are used.
 2. **Stablecoin freezes:** whether Tether (USDT, USDT0) or Circle (USDC) has blacklisted the
-   address, read straight from the token contracts. Binance-Peg stablecoins on BNB Chain have
-   no on-chain freeze list.
+   address, read straight from the token contracts (on Tron, Tether's USDT). Binance-Peg
+   stablecoins on BNB Chain have no on-chain freeze list.
 3. **Contacts:** every address it has sent to or received from, screened for sanctions, freezes
    and Tornado Cash contracts. Tornado Cash was delisted by OFAC in 2025, so the oracle no longer
    flags it, but exchanges still treat contact with it as high risk.
@@ -49,7 +50,9 @@ VERDICT: no red flags in public data
 ```
 
 Exit code 0 means no red flags, 1 means a red flag, 2 means bad input or an error. `--json`
-prints the full result for scripts, and `--chains eth,arb` limits the run. `--hops` sets how
+prints the full result for scripts, and `--chains eth,arb` limits the run. A `0x` address is
+screened on the three EVM chains and a Tron `T...` address on Tron; `--chains` can add Tron for
+a `0x` address too, since both formats are the same 20-byte key. `--hops` sets how
 far the exposure trace goes (0 turns it off) and `--budget` caps how many wallet histories it
 reads per chain and direction.
 
@@ -69,11 +72,17 @@ Chain is skipped if Etherscan refuses it. Without a key, Ethereum falls back
 to Blockscout's keyless API, which allows about three scans an hour. Put the key in
 `ETHERSCAN_API_KEY` or in `~/.config/aml-check/etherscan_key`.
 
+Tron history comes from [TronGrid](https://www.trongrid.io), which works without a key at three
+requests a second; the screen paces itself to that. A free TronGrid key in `TRONGRID_API_KEY`
+or `~/.config/aml-check/trongrid_key` makes it faster.
+
 ## Labels
 
 `labels/labels.csv` is built by `python labels/update_labels.py` from two public sources: the
-crypto addresses on the OFAC SDN list, and [eth-labels](https://github.com/dawsbot/eth-labels)
-(MIT), which collects explorer name tags. Rows in `labels/manual.csv` are added on top and win
+crypto addresses on the OFAC SDN list (EVM and Tron), and [eth-labels](https://github.com/dawsbot/eth-labels)
+(MIT), which collects explorer name tags for the EVM chains. No public label set covers Tron
+exchanges, so on Tron an exchange shows as "unnamed service" unless `manual.csv` names it;
+Tron rows there may use the `T...` form. Rows in `labels/manual.csv` are added on top and win
 over both. Rebuild it now and then; the explorers add tags faster than this repo is updated.
 
 ## As a Claude Code plugin
@@ -90,8 +99,10 @@ counterparties that matter (an exchange hot wallet, say), and flags a wallet wit
 
 It sees only public data. The trace can follow money to a busy wallet and say "unnamed
 service", but naming it takes the clustered labels commercial tools keep for exchanges, scams
-and darknet markets, so an exchange's own check may rate an address higher. A red flag here is real; a clean result means clean as
-far as public data shows. This is a screening aid, not legal or compliance advice.
+and darknet markets, so an exchange's own check may rate an address higher. Most bridges pay
+out from their own wallets and record nothing on-chain about the sender, so apart from Aori a
+bridge ends the trail: the money's source on the other chain stays unknown, which is not the
+same as clean. A red flag here is real; a clean result means clean as far as public data shows. This is a screening aid, not legal or compliance advice.
 
 ## License
 

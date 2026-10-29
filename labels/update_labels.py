@@ -69,6 +69,10 @@ def ofac_rows():
         for addr in re.findall(r"Digital Currency Address - \w+ (0x[0-9a-fA-F]{40})", rec[11]):
             rows.append({"address": addr.lower(), "chain": "*", "category": "sanctioned",
                          "name": rec[1].strip(), "source": "OFAC SDN"})
+        # Tron addresses stay in base58 (case matters); the trace converts them when loading.
+        for addr in re.findall(r"Digital Currency Address - TRX (T[1-9A-HJ-NP-Za-km-z]{33})", rec[11]):
+            rows.append({"address": addr, "chain": "tron", "category": "sanctioned",
+                         "name": rec[1].strip(), "source": "OFAC SDN"})
     return rows
 
 

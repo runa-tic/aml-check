@@ -84,8 +84,13 @@ PRICED_TOKENS = {
         "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1": "usd",       # DAI
         "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": "ethereum",  # WETH
     },
+    "tron": {  # hex form of the base58 addresses
+        "0xa614f803b6fd780986a42c78ec9c7f77e6ded13c": "usd",       # USDT  TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t
+        "0x3487b63d30b5b2c87fb7ffa8bcfade38eaac1abe": "usd",       # USDC  TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8
+        "0x891cdb91d149f23b1a45d9c5ca78a88d0cb44c18": "tron",      # WTRX  TNUC9Qb1rRpS5CbWLmNMxXBjyFoydXjWFR
+    },
 }
-NATIVE_ID = {"eth": "ethereum", "bsc": "binancecoin", "arb": "ethereum"}
+NATIVE_ID = {"eth": "ethereum", "bsc": "binancecoin", "arb": "ethereum", "tron": "tron"}
 
 # Verified contract name -> category, for contracts no label set knows. Bridges and swap
 # aggregators are most of what an ordinary wallet touches.
@@ -120,14 +125,21 @@ _labels = None
 
 
 def load_labels():
-    """{(address, chain): (category, name)}; chain "*" applies everywhere (OFAC entries)."""
+    """{(address, chain): (category, name)}; chain "*" applies everywhere (OFAC entries).
+    Tron rows may give the base58 form; they are keyed by the hex form the trace uses."""
     global _labels
     if _labels is None:
         _labels = {}
         if os.path.isfile(LABELS_FILE):
+            import aml_check
             with open(LABELS_FILE, encoding="utf-8", newline="") as f:
                 for r in csv.DictReader(f):
-                    _labels[(r["address"], r["chain"])] = (r["category"], r["name"])
+                    a = r["address"]
+                    if a.startswith("T"):
+                        a = aml_check.tron_hex(a)
+                        if not a:
+                            continue
+                    _labels[(a, r["chain"])] = (r["category"], r["name"])
     return _labels
 
 
@@ -180,12 +192,22 @@ def rpc_batch(api, chain, calls):
     return out
 
 
-def short(addr):
+def short(addr, api=None, chain=None):
+    if api and chain:
+        addr = api.display(chain, addr)
     return f"{addr[:6]}…{addr[-4:]}"
 
 
 def contract_name(api, chain, addr, key):
-    """Verified contract name from Etherscan (the implementation's, for a proxy), or None."""
+    """Verified contract name from Etherscan (the implementation's, for a proxy), or None.
+    On Tron, the name the deployer gave the contract, from TronGrid."""
+    if api.CHAINS[chain].get("kind") == "tron":
+        try:
+            r = api.http_json(api.TRONGRID + "/wallet/getcontract",
+                              {"value": api.display(chain, addr), "visible": True})
+            return r.get("name") or None
+        except Exception:
+            return None
     if not key:
         return None
     base = "https://api.etherscan.io/v2/api?"
@@ -241,9 +263,9 @@ def classify(api, chain, addrs, key=None):
             if name and WALLET_NAME.search(name):
                 continue  # a person's smart-contract wallet: leave as None so the trace goes on
             cat = next((c for c, rx in NAME_RULES if name and rx.search(name)), "smart contract")
-            out[a] = (cat, f"{name} {short(a)}" if name else short(a))
+            out[a] = (cat, f"{name} {short(a, api, chain)}" if name else short(a, api, chain))
         elif nonce and int(nonce, 16) >= HUB_NONCE:
-            out[a] = ("unnamed service", short(a))
+            out[a] = ("unnamed service", short(a, api, chain))
     return out
 
 
@@ -521,7 +543,7 @@ def trace(api, chain, target, rows, direction, key, hops, budget, prices):
                     result["failed_reads"] += 1
                 cache[node] = got
                 if got is not None and note and note.startswith("only the latest"):
-                    known[node] = ("unnamed service", short(addr))   # too busy to be one person
+                    known[node] = ("unnamed service", short(addr, api, c))   # too busy to be one person
             if known.get(node):
                 book(known[node][0], known[node][1], w, depth, c)
                 continue

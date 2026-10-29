@@ -3382,6 +3382,7 @@ address,chain,category,name,source
 0x12e4b5c0bbdcee751242d327a6f73b67e4bcc61f,eth,exchange,deribit,eth-labels
 0x12e51e77daaa58aa0e9247db7510ea4b46f9bead,eth,lending,Aave: aYFI Token V1,eth-labels
 0x12e72d1cf35a146fca65aed25ed1b991e1dc39c5,eth,exchange,Bitget Dep: 0x12e72d1cF35a146Fca65aed25Ed1B991e1DC39C5,eth-labels
+0x12ea80238c7d805d003ce793594e92d84a6f4e8d,*,sanctioned,"BOYKOV, Ilya Aleksandrovich",OFAC SDN
 0x12ebe4a11e3ae730d27b281bb99d90e41137e39a,eth,exchange,Binance Dep: 0x12ebe4a11e3ae730d27b281bb99d90e41137e39a,eth-labels
 0x12ed063f8c945f9f2f938912227cff6965817c9d,eth,exchange,Bitget Dep: 0x12Ed063f8c945F9f2f938912227cFf6965817c9D,eth-labels
 0x12ed69359919fc775bc2674860e8fe2d2b6a7b5d,eth,bridge,RSK: Token Bridge,eth-labels
@@ -20707,6 +20708,7 @@ address,chain,category,name,source
 0x7619d3991f38f29689200a59444116e48e06ac01,eth,dex,Bancor: Converter 476,eth-labels
 0x761b61828b4e403ebb9effac87cb2371f877d103,eth,dex,Balancer: MUSE/ETH 80/20,eth-labels
 0x761cc7a038e633ac879a16619d2abd886661460d,eth,exchange,Bitget Dep: 0x761cC7a038e633aC879A16619d2abd886661460D,eth-labels
+0x761edd5e4546229a0bd35ae99b4d3d01cf4a3510,*,sanctioned,"OBERTAS, Vitold Viktorovich",OFAC SDN
 0x761f6e5a5bae33e8b240422b6829522a00fa1e9a,eth,exchange,Bitget Dep: 0x761F6e5A5bAe33E8B240422b6829522a00fA1E9a,eth-labels
 0x76226b1588a49206e4ef75a8e8a2f6c0522d0947,bsc,dex,BurgerSwap: VSION,eth-labels
 0x762405fe227d8e9c01e231f88ded5298ba85df08,eth,exchange,Binance Dep: 0x762405fe227D8E9c01e231f88dED5298BA85DF08,eth-labels
@@ -39937,6 +39939,7 @@ address,chain,category,name,source
 0xe4c82afb1c2e2b7d0c1dbc5cfb5a4e58758d8779,eth,exchange,Bitget Dep: 0xe4C82AFB1C2E2B7D0C1DBC5cFB5a4E58758D8779,eth-labels
 0xe4c896a0e8d3e79ec4614d4d37eb51ec1eb0f874,eth,exchange,Binance Dep: 0xe4c896a0e8d3e79ec4614d4d37eb51ec1eb0f874,eth-labels
 0xe4c90b491464cf29b7b329d5f78c1a74c60d5972,eth,exchange,Bitget Dep: 0xE4C90b491464cF29B7b329d5f78C1a74c60D5972,eth-labels
+0xe4c9a7f68b1eba4508f54f07f7378847318dd1a3,*,sanctioned,"KIM, Ki Hyok",OFAC SDN
 0xe4cbd10881c28089947caee0e6c2dbf703db11aa,eth,exchange,Bitget Dep: 0xe4CBd10881c28089947CAeE0e6c2Dbf703Db11Aa,eth-labels
 0xe4ccb452ff3cbaaa488c9129a942a5fa8b513a7b,eth,exchange,Bitget Dep: 0xE4CcB452Ff3Cbaaa488c9129a942a5fa8b513A7b,eth-labels
 0xe4cce488de8c6c4c13b05cb8711a304f957d92f7,eth,dex,SushiSwap: BNBBACK,eth-labels
@@ -44691,3 +44694,93 @@ address,chain,category,name,source
 0xfffae4a0f4ac251f4705717cd24cadccc9f33e06,eth,dex,SushiSwap: OHM,eth-labels
 0xfffe32106a68aa3ed39ccce673b646423eeab62a,eth,lending,Aave: DAI Interest Rate Strategy V2,eth-labels
 0xffff5b24477f566fad44589b6dfcac1c7b6c966f,eth,exchange,Bitget Dep: 0xfFFF5B24477f566Fad44589b6dFCaC1c7b6C966f,eth-labels
+TAhHpxPRwo1Bmm1A9m51uZ31tcB7EPq7SY,tron,sanctioned,"AL-JEBOURI, Zaid Issam Ahmed",OFAC SDN
+TAhwhFv3JpK39Nc2m8W5LPCcoTisutiRfp,tron,sanctioned,BANK MARKAZI JOMHOURI ISLAMI IRAN,OFAC SDN
+TAoLw5yD5XUoHWeBZRSZ1ExK9HMv2CiPvP,tron,sanctioned,"WEDDING, Ryan James",OFAC SDN
+TASWbk6X1wiTku5TMmMQYqYFvshVEtfJy8,tron,sanctioned,ZEDCEX EXCHANGE LTD,OFAC SDN
+TAYhjpL8pPs8T84FSM329nffQpc6jD8GBM,tron,sanctioned,GRINEX,OFAC SDN
+TBcLqqqyZjNj1ptuXFgj5H768NhNU5nDyn,tron,sanctioned,"SOKOLOVSKI, Rolan",OFAC SDN
+TBEmt7kPSwAv6NJTYKNdBVW524bUfPwJpJ,tron,sanctioned,"HERNANDEZ GUERRERO, Anthony Wuiliam",OFAC SDN
+TBFW9gF4oDX5cG44gS7AoxQeujScmm3z6h,tron,sanctioned,"RASHEVSKYI, Dmytro",OFAC SDN
+TBKpozurdWLrbKkxtDqkveeq1dSB8Axj3V,tron,sanctioned,XINBI GUARANTEE,OFAC SDN
+TBtRqkiFzyuwe8nSAGQghxygAfwAF5eERq,tron,sanctioned,ISIL KHORASAN,OFAC SDN
+TBXMiRqUp1XH1zLazWu8cWitMAScv4HsYq,tron,sanctioned,"ABDERRAHMANE, Miloud",OFAC SDN
+TC8axQvzJEVR3NKN6mZnJtGy7537GEmh38,tron,sanctioned,GRINEX,OFAC SDN
+TCA9vmjsYw9MtPKEwRBtGhKFRfr4CLxJAv,tron,sanctioned,ZEDCEX EXCHANGE LTD,OFAC SDN
+TCFD8N3vM5b4Gr5f1kkajQsodRVNyyAq1d,tron,sanctioned,OLD VECTOR LLC,OFAC SDN
+TCifMAMwst3oEJx8GaNfqZw75dkFUa8vjG,tron,sanctioned,"MARTINEZ ARMENTA, Carlos Javier",OFAC SDN
+TCqKhk7MpPnGH3UfygE1TRzUo92a5tuVy6,tron,sanctioned,ISIL KHORASAN,OFAC SDN
+TCu5onCzXuqxjvVzdB2tR4FLuF66d4yRqf,tron,sanctioned,"SOKOLOVSKI, Rolan",OFAC SDN
+TCUmMCHQEbFFdGvfdg2LeS64QfzUKP2AgW,tron,sanctioned,"CARDENAS ARZOLA, Eric Gabriel",OFAC SDN
+TCV4qdpTxoMyqkn7sSPeRrXmhH5JFxMvmT,tron,sanctioned,"OBERTAS, Vitold Viktorovich",OFAC SDN
+TCzq6m2zxnQkrZrf8cqYcK6bbXQYAfWYKC,tron,sanctioned,ZEDCEX EXCHANGE LTD,OFAC SDN
+TDe2UNAvuUnTbbDo7518eMe3TXN5qJW8Ft,tron,sanctioned,AMNOKGANG TECHNOLOGY DEVELOPMENT COMPANY,OFAC SDN
+TDFj8tYzfLDkwEMo4MJ2DfrbpMztuCCnan,tron,sanctioned,"ABDERRAHMANE, Miloud",OFAC SDN
+TDFtJtyLPgN3oWUoHh23oJox3T5V5nR11K,tron,sanctioned,"SAYYED, Sadiq Abbas Habib",OFAC SDN
+TDU61o35UEe5hdB3R16c116DrPSV4kiyKz,tron,sanctioned,XINBI GUARANTEE,OFAC SDN
+TDxZ1XTZCmqkJJW2eJT362z6omRchJyGBX,tron,sanctioned,"MARTINEZ PIRONA, Oscar Leonardo",OFAC SDN
+TEcuHDQthTmULe8fFLUccBPpjfXaTmJuuD,tron,sanctioned,GRINEX,OFAC SDN
+TEECjwHqVG8sDmM3VtscjuCaRe5p351MU7,tron,sanctioned,XINBI GUARANTEE,OFAC SDN
+TEEYCuGDyeNkuDj4u6GQRXxXo3Nh29r2vP,tron,sanctioned,AMNOKGANG TECHNOLOGY DEVELOPMENT COMPANY,OFAC SDN
+TFdTr9C3BqQrzKBXqSxJfAZFTh8UwBAfSg,tron,sanctioned,OKO DESIGN BUREAU,OFAC SDN
+TFksjBcHPYqgAax2USheQuaT1ydRKyZRdg,tron,sanctioned,"OBERTAS, Vitold Viktorovich",OFAC SDN
+TFQbqaNbmq2xsVor2NbufLkYZvxFC9wC7k,tron,sanctioned,BANK MARKAZI JOMHOURI ISLAMI IRAN,OFAC SDN
+TG83Fk56S2mycAUMYHZyZp9wMg6DCf4bUn,tron,sanctioned,XINBI GUARANTEE,OFAC SDN
+TGckaiamj5NzaYx6Qp6Zu7kahuHArzUo99,tron,sanctioned,GRINEX,OFAC SDN
+TGr2i8ZQiiMRjP3mWyQUH2MQBfKu8GJNqm,tron,sanctioned,"AL-JEBOURI, Zaid Issam Ahmed",OFAC SDN
+TGsNFrgWfbGN2gX25Wcf8oTejtxtQkvmEx,tron,sanctioned,ZEDCEX EXCHANGE LTD,OFAC SDN
+TGXE9dGWawjfd3xqFSho1h1bRbRv9wUGrF,tron,sanctioned,"SIM, Hyon Sop",OFAC SDN
+THJUJFyTnrBWb1ijWav7qfRBrjUuKgP49Z,tron,sanctioned,"AL-JEBOURI, Zaid Issam Ahmed",OFAC SDN
+THwbVuBBb26abe5TrAsYUpYz9mhWnBppdz,tron,sanctioned,"GALEANO BAZURTO, Jose Dario",OFAC SDN
+TJdgB1k6ot3f2nLuZug6D8eD3HavTmzmSK,tron,sanctioned,BANK MARKAZI JOMHOURI ISLAMI IRAN,OFAC SDN
+TJjRAn9kLiyh8h6gjBjaYjkfDkskgZfyW9,tron,sanctioned,"CANELON AGUIRRE, Anibal Alexander",OFAC SDN
+TK3n8pGHvDTcK53mpfeDAMzdwjb22qvFU3,tron,sanctioned,XINBI GUARANTEE,OFAC SDN
+TKRNCETxbiMmyyMraCkgdXKdLr1ZkmKxV5,tron,sanctioned,XINBI GUARANTEE,OFAC SDN
+TL1k1U6SHohxBqb68kCodxHc9y2LXoDSep,tron,sanctioned,GRINEX,OFAC SDN
+TLoG3vbjDgqmTD5bM7w9rMgA6ysaNReuRy,tron,sanctioned,"AL-JEBOURI, Zaid Issam Ahmed",OFAC SDN
+TLvuvpfBKdxddxSsJefeiGCe9eVY8HUroE,tron,sanctioned,ZEDCEX EXCHANGE LTD,OFAC SDN
+TMStbg5fgb4uTV7fK1gEYF9hKAzP3siPsG,tron,sanctioned,"WANG, Jiantong",OFAC SDN
+TMuCgBejD5RsNANZdjGtaM3YyKGNgDoy7N,tron,sanctioned,GRINEX,OFAC SDN
+TNiq9AXBp9EjUqhDhrwrfvAA8U3GUQZH81,tron,sanctioned,BANK MARKAZI JOMHOURI ISLAMI IRAN,OFAC SDN
+TNmRfnSUXZoWWzxcDDbf95eGQYXt1mJDt8,tron,sanctioned,FUNNULL TECHNOLOGY INC,OFAC SDN
+TNrX2FwrHKoo4XACGkmSzqeK4pdnKYn6Z7,tron,sanctioned,AMNOKGANG TECHNOLOGY DEVELOPMENT COMPANY,OFAC SDN
+TNTFhgFoKH4srBMiWbfrVFqP2AThSmdwf1,tron,sanctioned,"SIM, Hyon Sop",OFAC SDN
+TNuA5CQ6LB4jTHoNrjEeQZJmcmhQuHMbQ7,tron,sanctioned,ZEDCEX EXCHANGE LTD,OFAC SDN
+TNZxGWCwvsHr6JxQxzoeDXV597Yf7Zb7nV,tron,sanctioned,GRINEX,OFAC SDN
+TPDLpXxPcaSsupEZ3yrVksmNkYP5SLeKxu,tron,sanctioned,"SIM, Hyon Sop",OFAC SDN
+TPgxjjB6AJeMSQFngbUM6dMMxPHa9GEtYa,tron,sanctioned,"KAYVANPOUR, Siavash",OFAC SDN
+TPJ1JNX98MJpHueBJeF5SVSg85z8mYg1P1,tron,sanctioned,"WEDDING, Ryan James",OFAC SDN
+TPyE2oSoaysrXfLzwf9wetBVr9JudLwjtD,tron,sanctioned,"AL-JEBOURI, Zaid Issam Ahmed",OFAC SDN
+TQ5H49Wz3K57zNHmuXVp6uLzFwitxviABs,tron,sanctioned,"ALIVAND, Arash Estaki",OFAC SDN
+TQCBdU4K92oxLAkzwexZpqVZJhmPbtLYMm,tron,sanctioned,"OBERTAS, Vitold Viktorovich",OFAC SDN
+TQKoDq5aCrWAciiNtete5pDYVN38i4qFN1,tron,sanctioned,"BOYKOV, Ilya Aleksandrovich",OFAC SDN
+TRakpsE1mZjCUMNPyozR4BW2ZtJsF7ZWFN,tron,sanctioned,"ALIVAND, Arash Estaki",OFAC SDN
+TRBACioxdrdsYEZHvJWiUDZcMdBPpEe5Ub,tron,sanctioned,"ZHANG, Wei",OFAC SDN
+TScXZTbDjjZ6a6jiC7dZjgCqfNo4vm7atV,tron,sanctioned,"AL-JEBOURI, Zaid Issam Ahmed",OFAC SDN
+TSxAAo67VTDgKT537EVXxdogkJtk9c6ojz,tron,sanctioned,"DERAKHSHAN, Alireza",OFAC SDN
+TTiDLWE6fZK8okMJv6ijg42yrH6W2pjSr9,tron,sanctioned,BANK MARKAZI JOMHOURI ISLAMI IRAN,OFAC SDN
+TTKnV2S1295UrPr7N67Tp9ykNL7xX2Z4Uj,tron,sanctioned,"XIA, Fengbing",OFAC SDN
+TTLRNgLpz5H5tLPuNU4FViUs7zmmAtyvzW,tron,sanctioned,"RASHEVSKYI, Dmytro",OFAC SDN
+TTs7KRq39547ruAsxb9brAPuTLy7h3U6H1,tron,sanctioned,ISIL KHORASAN,OFAC SDN
+TTS9o5KkpGgH8cK9LofLmMAPYb5zfQvSNa,tron,sanctioned,ZEDCEX EXCHANGE LTD,OFAC SDN
+TTUDyVhhpCC1xJoPmWzdjLAzeoPwbSABdr,tron,sanctioned,CRYPTEX,OFAC SDN
+TTVJuXWCusAURrpNShiypauagEH1N4CrxV,tron,sanctioned,CRYPTO HOME DMCC,OFAC SDN
+TTWRf2MD6zJ26bS4uKCNrcp84aAr7AmTjm,tron,sanctioned,XINBI GUARANTEE,OFAC SDN
+TU4tDFRvcKhAZ1jdihojmBWZqvJhQCnJ4F,tron,sanctioned,AEZA GROUP LLC,OFAC SDN
+TUoixKFaWVsHxGWgnYyMzpkrT22YqU7VvH,tron,sanctioned,ISIL KHORASAN,OFAC SDN
+TUuaxBAWfA5nmsqNfycxYrzEvz4a5GJMGY,tron,sanctioned,FIRST VPN SERVICE,OFAC SDN
+TVgUsVzA7mpFExP4zS7HHbtKti6UuBDuwZ,tron,sanctioned,"AL-JEBOURI, Zaid Issam Ahmed",OFAC SDN
+TVNyvx2astt2AB1Us67ENjfMZeEXZeiuu6,tron,sanctioned,"WEDDING, Ryan James",OFAC SDN
+TVttWTHTCU9kULP51m9BaHpmCW8H1BJJNQ,tron,sanctioned,ISIL KHORASAN,OFAC SDN
+TW5tokvhEfrb77z98Rc8HqbkzQJ6sxYtGX,tron,sanctioned,XINBI GUARANTEE,OFAC SDN
+TWJmTGhquvdp1jhBmgeGxBBwefteGZUQYW,tron,sanctioned,"MEJIA CASTILLO, Alejandro",OFAC SDN
+TWPma8xH48AEN93x2krdukV9e1j6sPsBeS,tron,sanctioned,XINBI GUARANTEE,OFAC SDN
+TWqcMjV7Wq2RHe2CSiKQHpkn6A7B2AWUPe,tron,sanctioned,XINBI GUARANTEE,OFAC SDN
+TXGHxdYbGy574z5hBu4LNzq9NzjZQ9bhUf,tron,sanctioned,BANK MARKAZI JOMHOURI ISLAMI IRAN,OFAC SDN
+TXHX2NUvcgft4zs6MkkUtdNVERPTavHDWN,tron,sanctioned,XINBI GUARANTEE,OFAC SDN
+TXmrnVgsqCMJncYHTXchuJ5z111BXSj4g3,tron,sanctioned,"BOYKOV, Ilya Aleksandrovich",OFAC SDN
+TXN3hVukebhyYR31YPCYd7aJAvmUeXu1ab,tron,sanctioned,SHPS SHELBIT,OFAC SDN
+TYDUutYN4YLKUPeT7TG27Yyqw6kNVLq9QZ,tron,sanctioned,"ALIVAND, Arash Estaki",OFAC SDN
+TYkE8VwX1SGHM3Q2CA29nka5U2F2khKAj5,tron,sanctioned,XINBI GUARANTEE,OFAC SDN
+TYvjt4ZKfsipHjA52nzgjUjDBF622SLCih,tron,sanctioned,XINBI GUARANTEE,OFAC SDN
+TZB4NrX7k9ZsV6PRc1GigAztLL8WHpLvwP,tron,sanctioned,AMNOKGANG TECHNOLOGY DEVELOPMENT COMPANY,OFAC SDN
