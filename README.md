@@ -17,7 +17,9 @@ For each chain it checks:
 4. **Exposure:** where the address's money came from and where it went, up to four wallets
    away, as shares of its USD value. This is what paid tools call indirect exposure: a wallet
    that never touched a sanctioned exchange still carries its risk if a third of its funds
-   passed through one two hops back. Each trail ends at the first wallet that carries a label
+   passed through one two hops back. Each wallet on the way is replayed oldest money first, so a
+   payment is traced to the inflows that actually funded it, not to money the wallet had already
+   passed on, and a swap it made itself keeps the origin of what it swapped. Each trail ends at the first wallet that carries a label
    (sanctioned, mixer, stolen funds, exchange, bridge, DEX ...) or looks like a service (a
    contract, or a wallet that has sent thousands of transactions). Unlabelled contracts are
    named from their verified source code, so a bridge or swap aggregator shows by name.

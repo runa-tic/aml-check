@@ -233,7 +233,7 @@ def history(chain, addr, key, max_tx):
                 continue  # reverted: the value never moved
             dec = int(t.get("tokenDecimal") or 18)
             rows.append({"from": (t.get("from") or "").lower(), "to": (t.get("to") or "").lower(),
-                         "value": int(t.get("value") or 0) / 10 ** dec,
+                         "value": int(t.get("value") or 0) / 10 ** dec, "raw": int(t.get("value") or 0),
                          "symbol": t.get("tokenSymbol") or cfg["gas"],
                          "token": (t.get("contractAddress") or "").lower() if action == "tokentx" else "",
                          "time": int(t.get("timeStamp") or 0), "hash": t.get("hash")})

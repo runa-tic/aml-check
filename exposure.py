@@ -13,8 +13,10 @@ How a trace works, for the incoming side (the outgoing side is the mirror image)
      contract, or a wallet that has sent thousands of transactions) ends the trail; its share is
      booked to that category. Exchanges and bridges pool everyone's funds, so following them
      further would only add noise.
-  4. An unlabelled wallet is opened up: its own inflow before it paid us is split by sender in
-     turn, and its share passes down proportionally. Repeat up to --hops deep.
+  4. An unlabelled wallet is opened up: its history is replayed in time order, oldest money spent
+     first, so the transfer that paid us is split across the inflows that actually funded it
+     (not the ones the wallet had already passed on). A swap the wallet made itself keeps the
+     origin of what it swapped. Repeat up to --hops deep.
   5. Whatever is left (beyond the hop limit, below 0.2%, or past the request budget) is booked
      as "untraced".
 Cross-chain swaps that write both ends on-chain are the exception to step 3: an Aori order names
@@ -29,7 +31,7 @@ import re
 import time
 import urllib.parse
 import urllib.request
-from collections import defaultdict
+from collections import defaultdict, deque
 
 LABELS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "labels", "labels.csv")
 
@@ -273,11 +275,109 @@ def edges(chain, rows, node, direction, bound, prices):
     return out
 
 
-def aori_order(receipt, bridge, node, direction):
-    """(LayerZero eid, address) at the other end of an Aori order in this receipt, or None.
+def fifo(chain, rows, node, prices):
+    """Replay a wallet's priced transfers in time order, spending the oldest money first.
 
-    Incoming: a Fill paying `node` on this chain; the other end is the offerer on the source
-    chain. Outgoing: a Deposit by `node`; the other end is the recipient on the destination chain.
+    Returns links (source, in hash, in time, dest, out hash, out time, usd): which inflow paid for
+    which outflow. source None = paid from money the history doesn't show (gas, unpriced
+    tokens); dest None = still held. A transaction with value both in and out is a swap: what
+    comes back inherits the origin of what was spent, so a DEX never shows as a source.
+    """
+    groups = defaultdict(list)
+    for r in rows:
+        v = usd_value(chain, r, prices)
+        if v > 0 and (r["to"] == node) != (r["from"] == node):
+            groups[(r["time"], r["hash"])].append((r, v))
+    lots, links = deque(), []   # lot: [usd, source, in hash, in time]
+
+    def spend(usd):
+        taken = []
+        while usd > 1e-9 and lots:
+            lot = lots[0]
+            k = min(usd, lot[0])
+            taken.append((lot[1], lot[2], lot[3], k))
+            lot[0] -= k
+            usd -= k
+            if lot[0] <= 1e-9:
+                lots.popleft()
+        if usd > 1e-9:
+            taken.append((None, None, None, usd))
+        return taken
+
+    # Inflows first within a second, so money passed straight through is not "unfunded".
+    order = sorted(groups, key=lambda g: (g[0], not any(r["to"] == node for r, _ in groups[g]), g[1]))
+    for t, h in order:
+        ins = [(r, v) for r, v in groups[(t, h)] if r["to"] == node]
+        outs = [(r, v) for r, v in groups[(t, h)] if r["from"] == node]
+        if ins and outs:
+            out_usd, in_usd = sum(v for _, v in outs), sum(v for _, v in ins)
+            for src, ih, it, k in spend(out_usd):
+                lots.append([k * in_usd / out_usd, src, ih, it])
+            continue
+        for r, v in ins:
+            lots.append([v, r["from"], h, t])
+        for r, v in outs:
+            for src, ih, it, k in spend(v):
+                links.append((src, ih, it, r["to"], h, t, k))
+    for usd, src, ih, it in lots:
+        links.append((src, ih, it, None, None, None, usd))
+    return links
+
+
+def follow(links, prev, txs, direction):
+    """Pass the weight of the transfers `txs` between `prev` and this wallet on to the inflows
+    that funded them (in) or the outflows that spent them (out).
+    Returns ({other: [weight, time, {hash: [weight, time]}]}, untraced weight)."""
+    nb, lost = {}, 0.0
+    for h, (wt, _) in txs.items():
+        if direction == "in":
+            mine = [(l[0], l[1], l[2], l[6]) for l in links if l[4] == h and l[3] == prev]
+        else:
+            mine = [(l[3], l[4], l[5], l[6]) for l in links if l[1] == h and l[0] == prev]
+        tot = sum(m[3] for m in mine)
+        if tot <= 0:
+            lost += wt
+            continue
+        for other, oh, ot, usd in mine:
+            part = wt * usd / tot
+            if other is None:
+                lost += part
+                continue
+            e = nb.setdefault(other, [0.0, ot, {}])
+            e[0] += part
+            e[1] = max(e[1], ot) if direction == "in" else min(e[1], ot)
+            x = e[2].setdefault(oh, [0.0, ot])
+            x[0] += part
+    return nb, lost
+
+
+def matched(rows, addr, match, bound, direction):
+    """The transfer at this end of a cross-chain order, found by amount and token:
+    (hash, time, counterparty) or None. Incoming trace: the deposit `addr` made at or before
+    the fill. Outgoing: the payout `addr` received at or after the deposit."""
+    raw, token = match
+    best = None
+    for r in rows:
+        if r["token"] != token or abs(r.get("raw", 0) - raw) > raw // 10 ** 6:
+            continue
+        if direction == "in" and r["from"] == addr and r["time"] <= bound + 600:
+            if best is None or r["time"] > best["time"]:
+                best = r
+        elif direction == "out" and r["to"] == addr and r["time"] >= bound - 600:
+            if best is None or r["time"] < best["time"]:
+                best = r
+    if best is None:
+        return None
+    return best["hash"], best["time"], best["to"] if direction == "in" else best["from"]
+
+
+def aori_order(receipt, bridge, node, direction):
+    """(LayerZero eid, address, raw amount, token) at the other end of an Aori order in this
+    receipt, or None. The token is "" for the native coin, as in history rows.
+
+    Incoming: a Fill paying `node` on this chain; the other end is the offerer's deposit on the
+    source chain. Outgoing: a Deposit by `node`; the other end is the payout to the recipient on
+    the destination chain.
     """
     topic = AORI_FILL if direction == "in" else AORI_DEPOSIT
     for lg in (receipt or {}).get("logs") or []:
@@ -289,10 +389,11 @@ def aori_order(receipt, bridge, node, direction):
             continue
         src, dst = int(words[6], 16), int(words[7], 16)
         offerer, recipient = "0x" + words[8][24:], "0x" + words[9][24:]
+        tok = lambda wd: "" if wd[24:] == "e" * 40 else "0x" + wd[24:]
         if direction == "in" and recipient == node:
-            return src, offerer
+            return src, offerer, int(words[0], 16), tok(words[2])
         if direction == "out" and offerer == node:
-            return dst, recipient
+            return dst, recipient, int(words[1], 16), tok(words[3])
     return None
 
 
@@ -321,18 +422,18 @@ def receipts(api, chain, hashes, key):
 
 def cross(api, chain, bridge, txs, node, direction, key):
     """Follow the order transactions `txs` ({hash: [weight, time]}) between `node` and an Aori
-    contract to the other chain. Returns [(chain or None, address, weight, time, chain name)];
-    weight not returned stays with the bridge."""
+    contract to the other chain. Returns [(chain or None, address, weight, time, chain name,
+    (raw amount, token) at the other end)]; weight not returned stays with the bridge."""
     hashes = sorted(txs, key=lambda h: -txs[h][0])[:MAX_CROSS_TX]
     out = []
     for h, rc in zip(hashes, receipts(api, chain, hashes, key)):
         order = aori_order(rc, bridge, node, direction)
         if not order:
             continue
-        eid, other = order
+        eid, other, raw, token = order
         c2 = LZ_EID.get(eid)
         name = LZ_NAME.get(eid, f"LayerZero chain {eid}")
-        out.append((c2 if c2 in api.CHAINS else None, other, txs[h][0], txs[h][1], name))
+        out.append((c2 if c2 in api.CHAINS else None, other, txs[h][0], txs[h][1], name, (raw, token)))
     return out
 
 
@@ -360,8 +461,11 @@ def trace(api, chain, target, rows, direction, key, hops, budget, prices):
     def scaled(etx, factor):
         return {h: [u * factor, t] for h, (u, t) in etx.items()}
 
-    cache, known = {(chain, target): rows}, {}
-    level = [(chain, a, v / total, 1, t, ((chain, target),), scaled(etx, 1 / total))
+    # A trail item: (chain, address, weight, depth, time bound, path, {tx hash: [weight, time]}
+    # of the transfers between it and `prev`, prev, (raw amount, token) when it was reached
+    # through a cross-chain order and its end of the order still has to be found).
+    cache, known, replays = {(chain, target): rows}, {}, {}
+    level = [(chain, a, v / total, 1, t, ((chain, target),), scaled(etx, 1 / total), target, None)
              for a, (v, t, etx) in start.items()]
     while level:
         # Only the counterparties that carry real weight get the on-chain lookups (oracle, code,
@@ -378,7 +482,7 @@ def trace(api, chain, target, rows, direction, key, hops, budget, prices):
             for a, lab in classify(api, c, addrs, key).items():
                 known[(c, a)] = lab
         nxt = []
-        for c, addr, w, depth, bound, path, txs in level:
+        for c, addr, w, depth, bound, path, txs, prev, match in level:
             node = (c, addr)
             lab = known.get(node) if node in known else label_for(c, addr)
             if node not in known and not lab:
@@ -388,13 +492,13 @@ def trace(api, chain, target, rows, direction, key, hops, budget, prices):
                 # The order names the wallet at the other end: the trail continues there, at the
                 # same depth, since the bridge only carried the funds.
                 left = w
-                for c2, other, wt, t, cname in cross(api, c, addr, txs, path[-1][1], direction, key):
+                for c2, other, wt, t, cname, m in cross(api, c, addr, txs, prev, direction, key):
                     left -= wt
                     if c2 is None:
                         book("bridge", f"{lab[1]} via {cname}", wt, depth, c)
                         continue
                     crossings[(c2, other)] += wt
-                    nxt.append((c2, other, wt, depth, t, path + (node,), {}))
+                    nxt.append((c2, other, wt, depth, t, path + (node,), {}, None, m))
                 if left > 1e-12:
                     book(lab[0], lab[1], left, depth, c)
                 continue
@@ -421,19 +525,27 @@ def trace(api, chain, target, rows, direction, key, hops, budget, prices):
             if known.get(node):
                 book(known[node][0], known[node][1], w, depth, c)
                 continue
-            nb = edges(c, cache[node] or [], addr, direction, bound, prices)
-            sub = sum(e[0] for e in nb.values())
-            if sub <= 0:
-                book("untraced", None, w, depth, c)
-                continue
+            got = cache[node] or []
+            if match:
+                end = matched(got, addr, match, bound, direction)
+                if end:
+                    txs, prev = {end[0]: [w, end[1]]}, end[2]
+            if txs and prev:
+                if node not in replays:
+                    replays[node] = fifo(c, got, addr, prices)
+                nb, lost = follow(replays[node], prev, txs, direction)
+            else:
+                # No transfer to pin down: split everything before (or after) the bound.
+                raw = edges(c, got, addr, direction, bound, prices)
+                sub = sum(e[0] for e in raw.values())
+                nb = {o: [w * v / sub, t, scaled(etx, w / sub)] for o, (v, t, etx) in raw.items()} if sub > 0 else {}
+                lost = 0.0 if sub > 0 else w
             ranked = sorted(nb.items(), key=lambda kv: -kv[1][0])
-            followed = 0.0
-            for other, (v, t, etx) in ranked[:TOP_K]:
-                share = w * v / sub
-                nxt.append((c, other, share, depth + 1, t, path + (node,), scaled(etx, share / v)))
-                followed += v
-            if sub - followed > 0:
-                book("untraced", None, w * (sub - followed) / sub, depth + 1, c)
+            for other, (share, t, etx) in ranked[:TOP_K]:
+                nxt.append((c, other, share, depth + 1, t, path + (node,), etx, addr, None))
+            lost += sum(e[0] for _, e in ranked[TOP_K:])
+            if lost > 1e-12:
+                book("untraced", None, lost, depth + 1, c)
         level = nxt
 
     for cat, c in cats.items():
